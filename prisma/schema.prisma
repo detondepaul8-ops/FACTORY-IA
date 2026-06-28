@@ -1,0 +1,97 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String             @id @default(cuid())
+  email             String             @unique
+  name              String
+  password          String
+  role              String             @default("user")
+  credits           Int                @default(50)
+  plan              String             @default("free")
+  isActive          Boolean            @default(true)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  apiKeys            ApiKey[]
+  creditTransactions CreditTransaction[]
+  queryLogs          QueryLog[]
+  subscriptions      Subscription[]
+  momoTransactions   MomoTransaction[]
+}
+
+model ApiKey {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  name      String
+  userId    String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  queryLogs QueryLog[]
+}
+
+model CreditTransaction {
+  id          String   @id @default(cuid())
+  userId      String
+  amount      Int
+  type        String
+  description String
+  referenceId String?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model QueryLog {
+  id            String   @id @default(cuid())
+  userId        String?
+  apiKeyId      String?
+  message       String
+  response      String
+  strategy      String
+  aiModelsUsed  String
+  webSources    String?
+  creditsCost   Int      @default(1)
+  responseTime  Int
+  createdAt     DateTime @default(now())
+
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  apiKey ApiKey? @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+}
+
+model Subscription {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  plan            String
+  creditsPerMonth Int      @default(100)
+  price           Int
+  status          String   @default("active")
+  startDate       DateTime @default(now())
+  endDate         DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model MomoTransaction {
+  id             String   @id @default(cuid())
+  userId         String
+  phoneNumber    String
+  amount         Int
+  creditsGranted Int
+  status         String
+  provider       String
+  externalRef    String?
+  createdAt      DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
