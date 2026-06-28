@@ -1,7 +1,7 @@
 // AI Core Engine — Le cerveau de FACTORY IA
 // Orchestration multi-IA avec routage intelligent
 
-export type AIProvider = 'gemini' | 'claude' | 'deepseek' | 'mistral' | 'groq'
+export type AIProvider = 'gemini' | 'claude' | 'deepseek' | 'mistral' | 'groq' | 'huggingface' | 'openrouter' | 'openai'
 export type QueryStrategy = 'single_ai' | 'multi_ai' | 'ai_plus_web'
 
 export type QueryIntent =
@@ -52,7 +52,7 @@ export const AI_PROFILES: Record<AIProvider, {
   name: string
   strengths: QueryIntent[]
   languages: string[]
-  speed: number // 1-5, 5 = le plus rapide
+  speed: number
   model: string
 }> = {
   gemini: {
@@ -90,6 +90,39 @@ export const AI_PROFILES: Record<AIProvider, {
     speed: 5,
     model: 'llama-3.3-70b-versatile',
   },
+  huggingface: {
+    name: 'HuggingFace',
+    strengths: ['code', 'general', 'creative'],
+    languages: ['en', 'fr'],
+    speed: 2,
+    model: 'mistralai/Mistral-7B-Instruct-v0.3',
+  },
+  openrouter: {
+    name: 'OpenRouter',
+    strengths: ['general', 'code', 'writing', 'analysis'],
+    languages: ['en', 'fr', 'de', 'es'],
+    speed: 3,
+    model: 'anthropic/claude-sonnet-4-20250514',
+  },
+  openai: {
+    name: 'OpenAI',
+    strengths: ['writing', 'analysis', 'code', 'creative', 'general'],
+    languages: ['en', 'fr', 'de', 'es'],
+    speed: 3,
+    model: 'gpt-4o-mini',
+  },
+}
+
+// Noms d'affichage
+export const PROVIDER_NAMES: Record<AIProvider, string> = {
+  gemini: 'Gemini',
+  claude: 'Claude',
+  deepseek: 'DeepSeek',
+  mistral: 'Mistral',
+  groq: 'Groq',
+  huggingface: 'HuggingFace',
+  openrouter: 'OpenRouter',
+  openai: 'OpenAI',
 }
 
 // Coûts en crédits par stratégie

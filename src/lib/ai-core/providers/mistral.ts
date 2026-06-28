@@ -1,14 +1,15 @@
-// Fournisseur Mistral — Rapide + Français
+// Fournisseur Mistral — Utilise le Provider Registry
 import type { AIResponse } from '../types'
+import { getProvider, recordProviderCall } from './registry'
 
 export async function queryMistral(message: string, _systemPrompt?: string): Promise<AIResponse> {
   const start = Date.now()
   try {
-    const apiKey = process.env.MISTRAL_API_KEY || ''
-    const url = 'https://api.mistral.ai/v1/chat/completions'
+    const provider = await getProvider('mistral')
+    if (!provider) throw new Error('Mistral non configuré')
 
     const body = {
-      model: 'mistral-large-latest',
+      model: provider.defaultModel,
       messages: [
         { role: 'system', content: 'Tu es un assistant IA intelligent et polyvalent. Réponds de façon claire et structurée en utilisant le Markdown.' },
         { role: 'user', content: message },
@@ -17,35 +18,34 @@ export async function queryMistral(message: string, _systemPrompt?: string): Pro
       temperature: 0.7,
     }
 
-    const res = await fetch(url, {
+    const res = await fetch(provider.baseUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        'Authorization': `${provider.authPrefix}${provider.apiKey}`,
       },
       body: JSON.stringify(body),
     })
 
     if (!res.ok) {
       const err = await res.text()
-      throw new Error(`Mistral API error ${res.status}: ${err}`)
+      const msg = `Mistral API error ${res.status}: ${err}`
+      await recordProviderCall('mistral', false, Date.now() - start, msg)
+      throw new Error(msg)
     }
 
     const data = await res.json()
     const content = data?.choices?.[0]?.message?.content || 'Aucune réponse générée.'
+    const latency = Date.now() - start
+    await recordProviderCall('mistral', true, latency)
 
-    return {
-      provider: 'mistral',
-      content,
-      model: 'mistral-large-latest',
-      latency: Date.now() - start,
-    }
+    return { provider: 'mistral', content, model: provider.defaultModel, latency }
   } catch (error) {
-    return {
-      provider: 'mistral',
-      content: `[Erreur Mistral] ${error instanceof Error ? error.message : 'Erreur inconnue'}`,
-      model: 'mistral-large-latest',
-      latency: Date.now() - start,
+    const latency = Date.now() - start
+    const msg = error instanceof Error ? error.message : 'Erreur inconnue'
+    if (!msg.includes('Mistral API error')) {
+      await recordProviderCall('mistral', false, latency, msg)
     }
+    return { provider: 'mistral', content: `[Erreur Mistral] ${msg}`, model: 'mistral', latency }
   }
 }

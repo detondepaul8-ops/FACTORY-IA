@@ -95,3 +95,46 @@ model MomoTransaction {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
+
+// ─── Système de gestion des fournisseurs IA ───────────────────────────────────
+
+model AIProvider {
+  id               String   @id @default(cuid())
+  slug             String   @unique // "gemini", "claude", "openrouter", etc.
+  name             String   // "Google Gemini"
+  description      String   // "Général + Raisonnement"
+  baseUrl          String   // URL de l'API
+  defaultModel     String   // "gemini-2.5-flash"
+  apiType          String   @default("openai") // openai, gemini, custom
+  authHeader       String   @default("Bearer") // "Bearer", "x-goog-api-key"
+  authPrefix       String   // "" pour Gemini (key dans query), "Bearer " pour OpenAI
+  isActive         Boolean  @default(true)
+  priority         Int      @default(0) // plus élevé = priorisé
+  strengths        String   // JSON: ["general","analysis","code"]
+  languages        String   // JSON: ["fr","en"]
+  speed            Int      @default(3) // 1-5
+  apiKeyEncrypted  String   // clé API chiffrée (base64 encodé, en production utiliser crypto)
+  lastHealthCheck  DateTime?
+  healthStatus     String   @default("unknown") // healthy, unhealthy, unknown
+  healthMessage    String?
+  lastError        String?
+  lastErrorAt      DateTime?
+  totalCalls       Int      @default(0)
+  successCalls     Int      @default(0)
+  failedCalls      Int      @default(0)
+  avgLatencyMs     Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  errorLogs ProviderErrorLog[]
+}
+
+model ProviderErrorLog {
+  id          String    @id @default(cuid())
+  providerId  String
+  provider    AIProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  errorCode   String?   // "401", "429", "500"
+  errorMessage String
+  requestInfo  String?  // JSON résumé de la requête
+  createdAt   DateTime  @default(now())
+}
