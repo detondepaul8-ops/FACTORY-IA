@@ -68,6 +68,17 @@ import {
   FileCode,
   Eye,
   EyeOff,
+  Server,
+  ServerCrash,
+  Heart,
+  HeartPulse,
+  RefreshCw,
+  AlertTriangle,
+  ToggleLeft,
+  ToggleRight,
+  Wifi,
+  WifiOff,
+  Settings,
 } from 'lucide-react'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -145,6 +156,31 @@ interface AdminStats {
   }
   byStrategy: { strategy: string; count: number; avgResponseTime: number }[]
   byPlan: { plan: string; count: number }[]
+}
+
+interface ProviderInfo {
+  id: string
+  slug: string
+  name: string
+  description: string
+  defaultModel: string
+  apiType: string
+  isActive: boolean
+  priority: number
+  strengths: string[]
+  languages: string[]
+  speed: number
+  healthStatus: 'healthy' | 'unhealthy' | 'unknown'
+  lastHealthCheck: string | null
+  totalCalls: number
+  successCalls: number
+  failedCalls: number
+  avgLatencyMs: number
+  lastError: string | null
+  lastErrorAt: string | null
+  apiKeyMasked: string
+  hasKey: boolean
+  healthResult?: { status: string; message: string; latency: number } | null
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -1172,10 +1208,341 @@ function CreditsTab({ user, onUpdateCredits }: { user: User; onUpdateCredits: (c
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// PROVIDERS TAB (AI Providers Management)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function ProvidersTab() {
+  const [providers, setProviders] = useState<ProviderInfo[]>([])
+  const [loading, setLoading] = useState(true)
+  const [checkingAll, setCheckingAll] = useState(false)
+  const [checkingSlug, setCheckingSlug] = useState<string | null>(null)
+
+  const fetchProviders = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/admin/providers')
+      const data = await res.json()
+      if (data.success) setProviders(data.data)
+    } catch {
+      toast.error('Erreur de chargement des fournisseurs')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { fetchProviders() }, [fetchProviders])
+
+  const checkAllHealth = async () => {
+    setCheckingAll(true)
+    try {
+      const res = await apiFetch('/api/admin/providers/health', {
+        method: 'POST',
+        body: JSON.stringify({ checkAll: true }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        toast.success('Vérification de tous les fournisseurs terminée')
+        await fetchProviders()
+      } else {
+        toast.error(data.error || 'Erreur lors de la vérification')
+      }
+    } catch {
+      toast.error('Erreur serveur lors du health check')
+    } finally {
+      setCheckingAll(false)
+    }
+  }
+
+  const checkSingleHealth = async (slug: string) => {
+    setCheckingSlug(slug)
+    try {
+      const res = await apiFetch('/api/admin/providers/health', {
+        method: 'POST',
+        body: JSON.stringify({ slug }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        toast.success(`Health check ${slug} terminé`)
+        await fetchProviders()
+      } else {
+        toast.error(data.error || `Erreur health check ${slug}`)
+      }
+    } catch {
+      toast.error('Erreur serveur')
+    } finally {
+      setCheckingSlug(null)
+    }
+  }
+
+  const toggleProvider = async (provider: ProviderInfo) => {
+    try {
+      const res = await apiFetch('/api/admin/providers', {
+        method: 'PATCH',
+        body: JSON.stringify({ id: provider.id, isActive: !provider.isActive }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        toast.success(`${provider.name} ${!provider.isActive ? 'activé' : 'désactivé'}`)
+        await fetchProviders()
+      } else {
+        toast.error(data.error || 'Erreur lors de la modification')
+      }
+    } catch {
+      toast.error('Erreur serveur')
+    }
+  }
+
+  const getHealthBadge = (status: string) => {
+    switch (status) {
+      case 'healthy':
+        return (
+          <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20 text-[10px] h-5">
+            <Heart className="w-3 h-3 mr-1" /> Healthy
+          </Badge>
+        )
+      case 'unhealthy':
+        return (
+          <Badge className="bg-red-500/15 text-red-400 border-red-500/30 hover:bg-red-500/20 text-[10px] h-5">
+            <HeartPulse className="w-3 h-3 mr-1" /> Unhealthy
+          </Badge>
+        )
+      default:
+        return (
+          <Badge className="bg-factory-border text-muted-foreground border-factory-border hover:bg-factory-border/80 text-[10px] h-5">
+            <ServerCrash className="w-3 h-3 mr-1" /> Unknown
+          </Badge>
+        )
+    }
+  }
+
+  const reliability = (p: ProviderInfo) =>
+    p.totalCalls > 0 ? Math.round((p.successCalls / p.totalCalls) * 100) : 0
+
+  if (loading) {
+    return (
+      <div className="space-y-4 p-1">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {[1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-64 w-full bg-factory-border rounded-xl" />
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (providers.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-center">
+        <Server className="w-12 h-12 text-muted-foreground/30 mb-4" />
+        <p className="text-sm text-muted-foreground">Aucun fournisseur configuré</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4 p-1">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold flex items-center gap-2">
+            <Settings className="w-4 h-4 text-emerald-400" />
+            Fournisseurs IA
+            <Badge variant="secondary" className="text-[10px] h-5 bg-factory-border text-muted-foreground ml-1">
+              {providers.length} fournisseurs
+            </Badge>
+          </h3>
+          <p className="text-xs text-muted-foreground mt-1">Gérez et surveillez vos fournisseurs d'IA</p>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={checkAllHealth}
+          disabled={checkingAll}
+          className="border-factory-border text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 h-8 text-xs"
+        >
+          {checkingAll ? (
+            <><Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> Vérification...</>
+          ) : (
+            <><HeartPulse className="w-3.5 h-3.5 mr-1.5" /> Vérifier tous</>
+          )}
+        </Button>
+      </div>
+
+      {/* Provider Cards Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {providers.map((p, idx) => (
+          <motion.div
+            key={p.id}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: idx * 0.05, duration: 0.25 }}
+          >
+            <Card className={`border-factory-border bg-factory-card h-full flex flex-col ${!p.isActive ? 'opacity-60' : ''}`}>
+              {/* Card Header */}
+              <CardHeader className="pb-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                      p.healthStatus === 'healthy' ? 'bg-emerald-500/10' :
+                      p.healthStatus === 'unhealthy' ? 'bg-red-500/10' : 'bg-factory-border'
+                    }`}>
+                      {p.healthStatus === 'healthy' ? (
+                        <Wifi className="w-4 h-4 text-emerald-400" />
+                      ) : p.healthStatus === 'unhealthy' ? (
+                        <WifiOff className="w-4 h-4 text-red-400" />
+                      ) : (
+                        <Server className="w-4 h-4 text-muted-foreground" />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <CardTitle className="text-sm truncate">{p.name}</CardTitle>
+                      <p className="text-[10px] text-muted-foreground font-mono">{p.slug}</p>
+                    </div>
+                  </div>
+                  {getHealthBadge(p.healthStatus)}
+                </div>
+              </CardHeader>
+
+              <CardContent className="flex-1 flex flex-col gap-3 pt-0">
+                {/* Description */}
+                <p className="text-xs text-muted-foreground leading-relaxed">{p.description}</p>
+
+                {/* Default Model */}
+                <div className="flex items-center gap-2">
+                  <Terminal className="w-3 h-3 text-muted-foreground shrink-0" />
+                  <code className="text-[11px] font-mono bg-background px-2 py-0.5 rounded border border-factory-border truncate">
+                    {p.defaultModel}
+                  </code>
+                  <Badge variant="outline" className="text-[9px] h-4 border-factory-border text-muted-foreground shrink-0">
+                    {p.apiType}
+                  </Badge>
+                </div>
+
+                {/* API Key */}
+                <div className="flex items-center gap-2">
+                  <Key className="w-3 h-3 text-muted-foreground shrink-0" />
+                  <span className="text-[11px] font-mono text-muted-foreground truncate">
+                    {p.hasKey ? p.apiKeyMasked : '—'}
+                  </span>
+                  {p.hasKey && (
+                    <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-[9px] h-4 shrink-0">
+                      Configurée
+                    </Badge>
+                  )}
+                </div>
+
+                {/* Stats Row */}
+                <div className="grid grid-cols-4 gap-1.5 text-center">
+                  <div className="bg-background rounded-lg py-1.5 px-1 border border-factory-border">
+                    <p className="text-xs font-bold">{p.totalCalls}</p>
+                    <p className="text-[9px] text-muted-foreground">Total</p>
+                  </div>
+                  <div className="bg-background rounded-lg py-1.5 px-1 border border-factory-border">
+                    <p className="text-xs font-bold text-emerald-400">{p.successCalls}</p>
+                    <p className="text-[9px] text-muted-foreground">Succès</p>
+                  </div>
+                  <div className="bg-background rounded-lg py-1.5 px-1 border border-factory-border">
+                    <p className="text-xs font-bold text-red-400">{p.failedCalls}</p>
+                    <p className="text-[9px] text-muted-foreground">Échecs</p>
+                  </div>
+                  <div className="bg-background rounded-lg py-1.5 px-1 border border-factory-border">
+                    <p className="text-xs font-bold">{p.avgLatencyMs > 0 ? `${p.avgLatencyMs}ms` : '—'}</p>
+                    <p className="text-[9px] text-muted-foreground">Latence</p>
+                  </div>
+                </div>
+
+                {/* Reliability Gauge */}
+                {p.totalCalls > 0 && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] text-muted-foreground">Fiabilité</span>
+                      <span className={`text-[10px] font-mono font-semibold ${
+                        reliability(p) >= 95 ? 'text-emerald-400' :
+                        reliability(p) >= 80 ? 'text-amber-400' : 'text-red-400'
+                      }`}>
+                        {reliability(p)}%
+                      </span>
+                    </div>
+                    <div className="h-1.5 bg-background rounded-full border border-factory-border overflow-hidden">
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${reliability(p)}%` }}
+                        transition={{ delay: 0.3 + idx * 0.05, duration: 0.6 }}
+                        className={`h-full rounded-full ${
+                          reliability(p) >= 95 ? 'bg-emerald-500' :
+                          reliability(p) >= 80 ? 'bg-amber-500' : 'bg-red-500'
+                        }`}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Strengths */}
+                {p.strengths.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {p.strengths.map((s) => (
+                      <Badge key={s} variant="secondary" className="text-[9px] h-4 bg-violet-500/10 text-violet-400 border-violet-500/20">
+                        {s}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+
+                {/* Last Error */}
+                {p.lastError && (
+                  <div className="flex items-start gap-1.5 p-2 rounded-lg bg-red-500/5 border border-red-500/10">
+                    <AlertTriangle className="w-3 h-3 text-red-400 shrink-0 mt-0.5" />
+                    <p className="text-[10px] text-red-400/80 line-clamp-2">{p.lastError}</p>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex items-center gap-2 mt-auto pt-2 border-t border-factory-border/50">
+                  <button
+                    onClick={() => toggleProvider(p)}
+                    className={`flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-lg border transition-all flex-1 justify-center ${
+                      p.isActive
+                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
+                        : 'border-factory-border bg-background text-muted-foreground hover:border-factory-muted/30'
+                    }`}
+                    aria-label={p.isActive ? `Désactiver ${p.name}` : `Activer ${p.name}`}
+                  >
+                    {p.isActive ? (
+                      <><ToggleRight className="w-3.5 h-3.5" /> Actif</>
+                    ) : (
+                      <><ToggleLeft className="w-3.5 h-3.5" /> Inactif</>
+                    )}
+                  </button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => checkSingleHealth(p.slug)}
+                    disabled={checkingSlug === p.slug}
+                    className="border-factory-border text-xs h-7 hover:bg-emerald-500/10 hover:text-emerald-400 hover:border-emerald-500/30"
+                    aria-label={`Tester ${p.name}`}
+                  >
+                    {checkingSlug === p.slug ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-3 h-3" />
+                    )}
+                    <span className="ml-1.5">Tester</span>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // ADMIN TAB
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function AdminTab() {
+  const [adminSubTab, setAdminSubTab] = useState('users')
   const [stats, setStats] = useState<AdminStats | null>(null)
   const [users, setUsers] = useState<AdminUser[]>([])
   const [totalUsers, setTotalUsers] = useState(0)
@@ -1229,217 +1596,238 @@ function AdminTab() {
   }
 
   return (
-    <div className="space-y-6 p-1">
-      {/* Stats Cards */}
-      {loading ? (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => (
-            <Skeleton key={i} className="h-24 w-full bg-factory-border" />
-          ))}
-        </div>
-      ) : stats && (
-        <motion.div {...slideUp} className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <Card className="border-factory-border bg-factory-card">
-            <CardContent className="pt-4 pb-4">
-              <Users className="w-5 h-5 text-emerald-400 mb-2" />
-              <p className="text-2xl font-bold">{stats.overview.totalUsers}</p>
-              <p className="text-xs text-muted-foreground">Utilisateurs</p>
-            </CardContent>
-          </Card>
-          <Card className="border-factory-border bg-factory-card">
-            <CardContent className="pt-4 pb-4">
-              <MessageSquare className="w-5 h-5 text-violet-400 mb-2" />
-              <p className="text-2xl font-bold">{stats.overview.totalQueries}</p>
-              <p className="text-xs text-muted-foreground">Requêtes</p>
-            </CardContent>
-          </Card>
-          <Card className="border-factory-border bg-factory-card">
-            <CardContent className="pt-4 pb-4">
-              <Key className="w-5 h-5 text-amber-400 mb-2" />
-              <p className="text-2xl font-bold">{stats.overview.totalApiKeys}</p>
-              <p className="text-xs text-muted-foreground">Clés API</p>
-            </CardContent>
-          </Card>
-          <Card className="border-factory-border bg-factory-card">
-            <CardContent className="pt-4 pb-4">
-              <Coins className="w-5 h-5 text-rose-400 mb-2" />
-              <p className="text-2xl font-bold">{stats.overview.totalCreditsConsumed}</p>
-              <p className="text-xs text-muted-foreground">Crédits consommés</p>
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
+    <div className="space-y-4 p-1">
+      <h2 className="text-lg font-semibold flex items-center gap-2">
+        <Shield className="w-5 h-5 text-violet-400" />
+        Administration
+      </h2>
+      <Tabs value={adminSubTab} onValueChange={setAdminSubTab}>
+        <TabsList className="bg-factory-card border border-factory-border">
+          <TabsTrigger value="users" className="data-[state=active]:bg-emerald-500/10 data-[state=active]:text-emerald-400 text-xs gap-1.5">
+            <Users className="w-3.5 h-3.5" /> Utilisateurs
+          </TabsTrigger>
+          <TabsTrigger value="providers" className="data-[state=active]:bg-emerald-500/10 data-[state=active]:text-emerald-400 text-xs gap-1.5">
+            <Server className="w-3.5 h-3.5" /> Fournisseurs IA
+          </TabsTrigger>
+        </TabsList>
 
-      {/* Strategy breakdown */}
-      {stats?.byStrategy && stats.byStrategy.length > 0 && (
-        <Card className="border-factory-border bg-factory-card">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-emerald-400" />
-              Répartition par stratégie
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {stats.byStrategy.map((s) => (
-                <div key={s.strategy} className="p-3 rounded-lg bg-background border border-factory-border">
-                  <Badge variant="secondary" className="mb-1 text-xs bg-emerald-500/10 text-emerald-400">
-                    {s.strategy}
-                  </Badge>
-                  <p className="text-lg font-bold">{s.count} requêtes</p>
-                  <p className="text-xs text-muted-foreground">~{s.avgResponseTime}ms en moyenne</p>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Users List */}
-      <Card className="border-factory-border bg-factory-card">
-        <CardHeader className="pb-3">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Users className="w-4 h-4 text-violet-400" />
-                Utilisateurs ({totalUsers})
-              </CardTitle>
-            </div>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                placeholder="Rechercher..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-9 bg-background border-factory-border w-full sm:w-64"
-                aria-label="Rechercher un utilisateur"
-              />
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
+        <TabsContent value="users" className="mt-4 space-y-6">
+          {/* Stats Cards */}
           {loading ? (
-            <div className="space-y-2">
-              {[1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-12 w-full bg-factory-border" />
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              {[1, 2, 3, 4].map((i) => (
+                <Skeleton key={i} className="h-24 w-full bg-factory-border" />
               ))}
             </div>
-          ) : users.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-6">Aucun utilisateur trouvé</p>
-          ) : (
-            <div className="max-h-96 overflow-y-auto factory-scroll">
-              <Table>
-                <TableHeader>
-                  <TableRow className="border-factory-border hover:bg-transparent">
-                    <TableHead className="text-xs">Utilisateur</TableHead>
-                    <TableHead className="text-xs hidden md:table-cell">Rôle</TableHead>
-                    <TableHead className="text-xs text-right">Crédits</TableHead>
-                    <TableHead className="text-xs hidden sm:table-cell">Plan</TableHead>
-                    <TableHead className="text-xs hidden lg:table-cell">Requêtes</TableHead>
-                    <TableHead className="text-xs text-right">Action</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {users.map((u) => (
-                    <TableRow key={u.id} className="border-factory-border">
-                      <TableCell className="py-2.5">
-                        <div>
-                          <p className="text-xs font-medium truncate max-w-[150px]">{u.name}</p>
-                          <p className="text-[10px] text-muted-foreground truncate max-w-[150px]">{u.email}</p>
-                        </div>
-                      </TableCell>
-                      <TableCell className="hidden md:table-cell">
-                        <Badge
-                          variant={u.role === 'admin' ? 'default' : 'secondary'}
-                          className={`text-[10px] h-5 ${
-                            u.role === 'admin'
-                              ? 'bg-violet-500/20 text-violet-400 border-violet-500/30'
-                              : 'bg-factory-border text-muted-foreground'
-                          }`}
-                        >
-                          {u.role}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-xs text-right font-mono">
-                        <span className={u.credits < 10 ? 'text-destructive' : 'text-emerald-400'}>
-                          {u.credits}
-                        </span>
-                      </TableCell>
-                      <TableCell className="hidden sm:table-cell">
-                        <Badge variant="outline" className="text-[10px] h-5 border-factory-border text-muted-foreground">
-                          {u.plan}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground hidden lg:table-cell">
-                        {u._count.queryLogs}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 text-xs text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
-                          onClick={() => setCreditDialog({ open: true, user: u })}
-                          aria-label={`Ajouter des crédits à ${u.name}`}
-                        >
-                          <Plus className="w-3 h-3 mr-1" /> Crédits
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+          ) : stats && (
+            <motion.div {...slideUp} className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <Card className="border-factory-border bg-factory-card">
+                <CardContent className="pt-4 pb-4">
+                  <Users className="w-5 h-5 text-emerald-400 mb-2" />
+                  <p className="text-2xl font-bold">{stats.overview.totalUsers}</p>
+                  <p className="text-xs text-muted-foreground">Utilisateurs</p>
+                </CardContent>
+              </Card>
+              <Card className="border-factory-border bg-factory-card">
+                <CardContent className="pt-4 pb-4">
+                  <MessageSquare className="w-5 h-5 text-violet-400 mb-2" />
+                  <p className="text-2xl font-bold">{stats.overview.totalQueries}</p>
+                  <p className="text-xs text-muted-foreground">Requêtes</p>
+                </CardContent>
+              </Card>
+              <Card className="border-factory-border bg-factory-card">
+                <CardContent className="pt-4 pb-4">
+                  <Key className="w-5 h-5 text-amber-400 mb-2" />
+                  <p className="text-2xl font-bold">{stats.overview.totalApiKeys}</p>
+                  <p className="text-xs text-muted-foreground">Clés API</p>
+                </CardContent>
+              </Card>
+              <Card className="border-factory-border bg-factory-card">
+                <CardContent className="pt-4 pb-4">
+                  <Coins className="w-5 h-5 text-rose-400 mb-2" />
+                  <p className="text-2xl font-bold">{stats.overview.totalCreditsConsumed}</p>
+                  <p className="text-xs text-muted-foreground">Crédits consommés</p>
+                </CardContent>
+              </Card>
+            </motion.div>
           )}
-        </CardContent>
-      </Card>
 
-      {/* Add Credits Dialog */}
-      <Dialog open={creditDialog.open} onOpenChange={(open) => setCreditDialog({ open, user: null })}>
-        <DialogContent className="bg-factory-card border-factory-border">
-          <DialogHeader>
-            <DialogTitle>Ajouter des crédits</DialogTitle>
-            <DialogDescription>
-              {creditDialog.user && `Ajouter des crédits à ${creditDialog.user.name} (${creditDialog.user.email})`}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex gap-2">
-            {[50, 100, 500, 1000].map((amount) => (
-              <button
-                key={amount}
-                onClick={() => setCreditAmount(String(amount))}
-                className={`flex-1 py-2 rounded-lg text-xs font-medium border transition-all ${
-                  creditAmount === String(amount)
-                    ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400'
-                    : 'border-factory-border text-muted-foreground hover:border-factory-muted/30'
-                }`}
-              >
-                +{amount}
-              </button>
-            ))}
-          </div>
-          <Input
-            type="number"
-            placeholder="Montant personnalisé"
-            value={creditAmount}
-            onChange={(e) => setCreditAmount(e.target.value)}
-            className="bg-background border-factory-border"
-            aria-label="Montant de crédits à ajouter"
-          />
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setCreditDialog({ open: false, user: null })}>
-              Annuler
-            </Button>
-            <Button
-              onClick={addCredits}
-              disabled={addingCredits || !creditAmount}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white"
-            >
-              {addingCredits && <Loader2 className="w-4 h-4 animate-spin mr-1" />}
-              Ajouter
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          {/* Strategy breakdown */}
+          {stats?.byStrategy && stats.byStrategy.length > 0 && (
+            <Card className="border-factory-border bg-factory-card">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-emerald-400" />
+                  Répartition par stratégie
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {stats.byStrategy.map((s) => (
+                    <div key={s.strategy} className="p-3 rounded-lg bg-background border border-factory-border">
+                      <Badge variant="secondary" className="mb-1 text-xs bg-emerald-500/10 text-emerald-400">
+                        {s.strategy}
+                      </Badge>
+                      <p className="text-lg font-bold">{s.count} requêtes</p>
+                      <p className="text-xs text-muted-foreground">~{s.avgResponseTime}ms en moyenne</p>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Users List */}
+          <Card className="border-factory-border bg-factory-card">
+            <CardHeader className="pb-3">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Users className="w-4 h-4 text-violet-400" />
+                    Utilisateurs ({totalUsers})
+                  </CardTitle>
+                </div>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Rechercher..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="pl-9 bg-background border-factory-border w-full sm:w-64"
+                    aria-label="Rechercher un utilisateur"
+                  />
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {loading ? (
+                <div className="space-y-2">
+                  {[1, 2, 3].map((i) => (
+                    <Skeleton key={i} className="h-12 w-full bg-factory-border" />
+                  ))}
+                </div>
+              ) : users.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-6">Aucun utilisateur trouvé</p>
+              ) : (
+                <div className="max-h-96 overflow-y-auto factory-scroll">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="border-factory-border hover:bg-transparent">
+                        <TableHead className="text-xs">Utilisateur</TableHead>
+                        <TableHead className="text-xs hidden md:table-cell">Rôle</TableHead>
+                        <TableHead className="text-xs text-right">Crédits</TableHead>
+                        <TableHead className="text-xs hidden sm:table-cell">Plan</TableHead>
+                        <TableHead className="text-xs hidden lg:table-cell">Requêtes</TableHead>
+                        <TableHead className="text-xs text-right">Action</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {users.map((u) => (
+                        <TableRow key={u.id} className="border-factory-border">
+                          <TableCell className="py-2.5">
+                            <div>
+                              <p className="text-xs font-medium truncate max-w-[150px]">{u.name}</p>
+                              <p className="text-[10px] text-muted-foreground truncate max-w-[150px]">{u.email}</p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell">
+                            <Badge
+                              variant={u.role === 'admin' ? 'default' : 'secondary'}
+                              className={`text-[10px] h-5 ${
+                                u.role === 'admin'
+                                  ? 'bg-violet-500/20 text-violet-400 border-violet-500/30'
+                                  : 'bg-factory-border text-muted-foreground'
+                              }`}
+                            >
+                              {u.role}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-xs text-right font-mono">
+                            <span className={u.credits < 10 ? 'text-destructive' : 'text-emerald-400'}>
+                              {u.credits}
+                            </span>
+                          </TableCell>
+                          <TableCell className="hidden sm:table-cell">
+                            <Badge variant="outline" className="text-[10px] h-5 border-factory-border text-muted-foreground">
+                              {u.plan}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground hidden lg:table-cell">
+                            {u._count.queryLogs}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 text-xs text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
+                              onClick={() => setCreditDialog({ open: true, user: u })}
+                              aria-label={`Ajouter des crédits à ${u.name}`}
+                            >
+                              <Plus className="w-3 h-3 mr-1" /> Crédits
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Add Credits Dialog */}
+          <Dialog open={creditDialog.open} onOpenChange={(open) => setCreditDialog({ open, user: null })}>
+            <DialogContent className="bg-factory-card border-factory-border">
+              <DialogHeader>
+                <DialogTitle>Ajouter des crédits</DialogTitle>
+                <DialogDescription>
+                  {creditDialog.user && `Ajouter des crédits à ${creditDialog.user.name} (${creditDialog.user.email})`}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="flex gap-2">
+                {[50, 100, 500, 1000].map((amount) => (
+                  <button
+                    key={amount}
+                    onClick={() => setCreditAmount(String(amount))}
+                    className={`flex-1 py-2 rounded-lg text-xs font-medium border transition-all ${
+                      creditAmount === String(amount)
+                        ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400'
+                        : 'border-factory-border text-muted-foreground hover:border-factory-muted/30'
+                    }`}
+                  >
+                    +{amount}
+                  </button>
+                ))}
+              </div>
+              <Input
+                type="number"
+                placeholder="Montant personnalisé"
+                value={creditAmount}
+                onChange={(e) => setCreditAmount(e.target.value)}
+                className="bg-background border-factory-border"
+                aria-label="Montant de crédits à ajouter"
+              />
+              <DialogFooter>
+                <Button variant="ghost" onClick={() => setCreditDialog({ open: false, user: null })}>
+                  Annuler
+                </Button>
+                <Button
+                  onClick={addCredits}
+                  disabled={addingCredits || !creditAmount}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white"
+                >
+                  {addingCredits && <Loader2 className="w-4 h-4 animate-spin mr-1" />}
+                  Ajouter
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </TabsContent>
+
+        <TabsContent value="providers" className="mt-4">
+          <ProvidersTab />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
@@ -1735,7 +2123,7 @@ function Dashboard({ user: initialUser, onLogout }: { user: User; onLogout: () =
             <Zap className="w-3 h-3 text-emerald-500/50" />
             Powered by Multi-AI Engine
             <span className="text-factory-border">•</span>
-            Claude • Gemini • DeepSeek • Mistral • Groq
+            Gemini • Claude • DeepSeek • Mistral • Groq • HuggingFace • OpenRouter • OpenAI
           </p>
         </div>
       </footer>

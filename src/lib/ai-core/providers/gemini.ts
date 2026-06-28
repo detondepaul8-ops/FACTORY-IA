@@ -1,20 +1,25 @@
-// Fournisseur Gemini — Général + Raisonnement
+// Fournisseur Gemini — Utilise le Provider Registry
 import type { AIResponse } from '../types'
+import { getProvider, recordProviderCall } from './registry'
 
-export async function queryGemini(message: string, _systemPrompt?: string): Promise<AIResponse> {
+export async function queryGemini(message: string, systemPrompt?: string): Promise<AIResponse> {
   const start = Date.now()
   try {
-    const apiKey = process.env.GEMINI_API_KEY || ''
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`
+    const provider = await getProvider('gemini')
+    if (!provider) throw new Error('Gemini non configuré')
+
+    const url = `${provider.baseUrl}?key=${provider.apiKey}`
+
+    const contents = []
+    if (systemPrompt) {
+      contents.push({ role: 'user', parts: [{ text: systemPrompt }] })
+      contents.push({ role: 'model', parts: [{ text: 'Compris.' }] })
+    }
+    contents.push({ parts: [{ text: message }] })
 
     const body = {
-      contents: [{
-        parts: [{ text: message }]
-      }],
-      generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 4096,
-      }
+      contents,
+      generationConfig: { temperature: 0.7, maxOutputTokens: 4096 },
     }
 
     const res = await fetch(url, {
@@ -25,24 +30,23 @@ export async function queryGemini(message: string, _systemPrompt?: string): Prom
 
     if (!res.ok) {
       const err = await res.text()
-      throw new Error(`Gemini API error ${res.status}: ${err}`)
+      const msg = `Gemini API error ${res.status}: ${err}`
+      await recordProviderCall('gemini', false, Date.now() - start, msg)
+      throw new Error(msg)
     }
 
     const data = await res.json()
     const content = data?.candidates?.[0]?.content?.parts?.[0]?.text || 'Aucune réponse générée.'
+    const latency = Date.now() - start
+    await recordProviderCall('gemini', true, latency)
 
-    return {
-      provider: 'gemini',
-      content,
-      model: 'gemini-2.5-flash',
-      latency: Date.now() - start,
-    }
+    return { provider: 'gemini', content, model: provider.defaultModel, latency }
   } catch (error) {
-    return {
-      provider: 'gemini',
-      content: `[Erreur Gemini] ${error instanceof Error ? error.message : 'Erreur inconnue'}`,
-      model: 'gemini-2.5-flash',
-      latency: Date.now() - start,
+    const latency = Date.now() - start
+    const msg = error instanceof Error ? error.message : 'Erreur inconnue'
+    if (!msg.includes('Gemini API error')) {
+      await recordProviderCall('gemini', false, latency, msg)
     }
+    return { provider: 'gemini', content: `[Erreur Gemini] ${msg}`, model: 'gemini', latency }
   }
 }

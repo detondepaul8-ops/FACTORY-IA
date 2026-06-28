@@ -1,14 +1,15 @@
-// Fournisseur Groq — Vitesse + Optimisation
+// Fournisseur Groq — Utilise le Provider Registry
 import type { AIResponse } from '../types'
+import { getProvider, recordProviderCall } from './registry'
 
 export async function queryGroq(message: string, _systemPrompt?: string): Promise<AIResponse> {
   const start = Date.now()
   try {
-    const apiKey = process.env.GROQ_API_KEY || ''
-    const url = 'https://api.groq.com/openai/v1/chat/completions'
+    const provider = await getProvider('groq')
+    if (!provider) throw new Error('Groq non configuré')
 
     const body = {
-      model: 'llama-3.3-70b-versatile',
+      model: provider.defaultModel,
       messages: [
         { role: 'system', content: 'Tu es un assistant IA intelligent. Réponds de façon structurée en Markdown.' },
         { role: 'user', content: message },
@@ -17,35 +18,34 @@ export async function queryGroq(message: string, _systemPrompt?: string): Promis
       temperature: 0.7,
     }
 
-    const res = await fetch(url, {
+    const res = await fetch(provider.baseUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        'Authorization': `${provider.authPrefix}${provider.apiKey}`,
       },
       body: JSON.stringify(body),
     })
 
     if (!res.ok) {
       const err = await res.text()
-      throw new Error(`Groq API error ${res.status}: ${err}`)
+      const msg = `Groq API error ${res.status}: ${err}`
+      await recordProviderCall('groq', false, Date.now() - start, msg)
+      throw new Error(msg)
     }
 
     const data = await res.json()
     const content = data?.choices?.[0]?.message?.content || 'Aucune réponse générée.'
+    const latency = Date.now() - start
+    await recordProviderCall('groq', true, latency)
 
-    return {
-      provider: 'groq',
-      content,
-      model: 'llama-3.3-70b-versatile',
-      latency: Date.now() - start,
-    }
+    return { provider: 'groq', content, model: provider.defaultModel, latency }
   } catch (error) {
-    return {
-      provider: 'groq',
-      content: `[Erreur Groq] ${error instanceof Error ? error.message : 'Erreur inconnue'}`,
-      model: 'llama-3.3-70b-versatile',
-      latency: Date.now() - start,
+    const latency = Date.now() - start
+    const msg = error instanceof Error ? error.message : 'Erreur inconnue'
+    if (!msg.includes('Groq API error')) {
+      await recordProviderCall('groq', false, latency, msg)
     }
+    return { provider: 'groq', content: `[Erreur Groq] ${msg}`, model: 'groq', latency }
   }
 }

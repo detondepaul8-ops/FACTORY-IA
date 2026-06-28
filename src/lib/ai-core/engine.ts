@@ -1,42 +1,43 @@
-// ENGINE PRINCIPAL — Orchestration complète
+// ENGINE PRINCIPAL — Orchestration complète via Provider Registry
 // Le cerveau qui coordonne tout
 
 import type { FinalResponse, AIProvider, AIResponse, WebSource } from './types'
-import { CREDITS_COST } from './types'
+import { CREDITS_COST, PROVIDER_NAMES } from './types'
 import { parseQuery, decideStrategy, selectProviders } from './router'
 import { compareResponses } from './compare'
+import { getActiveProviders, isProviderAvailable, type ProviderInternal } from './providers/registry'
 import { queryGemini } from './providers/gemini'
 import { queryClaude } from './providers/claude'
 import { queryDeepSeek } from './providers/deepseek'
 import { queryMistral } from './providers/mistral'
 import { queryGroq } from './providers/groq'
+import { queryHuggingFace } from './providers/huggingface'
+import { queryOpenRouter } from './providers/openrouter'
+import { queryOpenAI } from './providers/openai'
 import { queryFallback } from './providers/fallback'
 import { searchGoogle, searchYouTube } from '../tools/search'
 
-// Map provider → function
-const PROVIDERS: Record<AIProvider, (msg: string) => Promise<AIResponse>> = {
+// Map provider slug → function de requête
+const PROVIDERS: Record<string, (msg: string) => Promise<AIResponse>> = {
   gemini: queryGemini,
   claude: queryClaude,
   deepseek: queryDeepSeek,
   mistral: queryMistral,
   groq: queryGroq,
+  huggingface: queryHuggingFace,
+  openrouter: queryOpenRouter,
+  openai: queryOpenAI,
 }
 
-// Vérifie si un provider a une clé API configurée
-function hasApiKey(provider: AIProvider): boolean {
-  const keys: Record<AIProvider, string> = {
-    gemini: process.env.GEMINI_API_KEY || '',
-    claude: process.env.CLAUDE_API_KEY || process.env.ANTHROPIC_API_KEY || '',
-    deepseek: process.env.DEEPSEEK_API_KEY || '',
-    mistral: process.env.MISTRAL_API_KEY || '',
-    groq: process.env.GROQ_API_KEY || '',
-  }
-  return !!keys[provider]
+// Vérifie si un provider est disponible (actif + clé + healthy)
+async function isAvailable(slug: string): Promise<boolean> {
+  return isProviderAvailable(slug)
 }
 
-// Vérifie si au moins une clé API est configurée
-function hasAnyApiKey(): boolean {
-  return (Object.keys(PROVIDERS) as AIProvider[]).some(hasApiKey)
+// Obtenir la liste des slugs configurés en DB
+async function getConfiguredSlugs(): Promise<string[]> {
+  const providers = await getActiveProviders()
+  return providers.map(p => p.slug)
 }
 
 export async function processQuery(message: string, _userId?: string): Promise<FinalResponse> {
@@ -48,11 +49,12 @@ export async function processQuery(message: string, _userId?: string): Promise<F
   // 2. Décider de la stratégie
   const strategy = decideStrategy(query)
 
-  // 3. Sélectionner les providers
+  // 3. Sélectionner les providers idéaux
   let providers = selectProviders(query, strategy)
 
-  // 4. Si aucune clé API configurée, utiliser le fallback
-  const useFallback = !hasAnyApiKey()
+  // 4. Vérifier les providers disponibles en DB
+  const configuredSlugs = await getConfiguredSlugs()
+  const useFallback = configuredSlugs.length === 0
   let webSources: WebSource[] = []
 
   // 5. Recherche web si nécessaire
@@ -62,26 +64,19 @@ export async function processQuery(message: string, _userId?: string): Promise<F
         searchGoogle(query.text),
         searchYouTube(query.text),
       ])
-
-      if (googleResults.status === 'fulfilled') {
-        webSources.push(...googleResults.value)
-      }
-      if (youtubeResults.status === 'fulfilled') {
-        webSources.push(...youtubeResults.value)
-      }
+      if (googleResults.status === 'fulfilled') webSources.push(...googleResults.value)
+      if (youtubeResults.status === 'fulfilled') webSources.push(...youtubeResults.value)
     } catch {
-      // Web search failed, continue with AI only
+      // Web search failed
     }
   }
 
-  // 6. Construire le prompt enrichi si on a des sources web
+  // 6. Enrichir le message avec les sources web
   let enrichedMessage = message
   if (webSources.length > 0) {
-    const context = webSources
-      .slice(0, 5)
+    const context = webSources.slice(0, 5)
       .map((s, i) => `${i + 1}. **${s.title}** (${s.url})\n   ${s.snippet}`)
       .join('\n')
-
     enrichedMessage = `${message}\n\n---\n**Sources web trouvées (utilise-les pour enrichir ta réponse) :**\n${context}\n---`
   }
 
@@ -89,28 +84,42 @@ export async function processQuery(message: string, _userId?: string): Promise<F
   let aiResponses: AIResponse[] = []
 
   if (useFallback) {
-    // Mode fallback : utiliser z-ai-web-dev-sdk
     const response = await queryFallback(enrichedMessage)
     aiResponses = [response]
     providers = [response.provider]
   } else {
-    // Filtrer les providers sans clé
-    const availableProviders = providers.filter(hasApiKey)
+    // Filtrer : garder seulement ceux configurés et disponibles
+    const availableChecks = await Promise.all(providers.map(p => isAvailable(p)))
+    const availableProviders = providers.filter((_, i) => availableChecks[i])
 
-    if (availableProviders.length === 0) {
-      // Aucun provider disponible, utiliser fallback
+    // Retirer les doublons de slugs (ex: openrouter qui peut faire claude)
+    const uniqueSlugs = [...new Set(availableProviders)]
+
+    if (uniqueSlugs.length === 0) {
       const response = await queryFallback(enrichedMessage)
       aiResponses = [response]
       providers = [response.provider]
     } else {
-      // Appels parallèles
-      const calls = availableProviders.map(p => PROVIDERS[p](enrichedMessage))
-      const results = await Promise.allSettled(calls)
+      // Limiter aux providers qui ont une fonction de requête
+      const callable = uniqueSlugs.filter(s => PROVIDERS[s])
 
-      for (const result of results) {
-        if (result.status === 'fulfilled') {
-          aiResponses.push(result.value)
+      if (callable.length === 0) {
+        const response = await queryFallback(enrichedMessage)
+        aiResponses = [response]
+        providers = [response.provider]
+      } else {
+        // Appels parallèles
+        const calls = callable.map(p => PROVIDERS[p](enrichedMessage))
+        const results = await Promise.allSettled(calls)
+
+        for (const result of results) {
+          if (result.status === 'fulfilled') {
+            aiResponses.push(result.value)
+          }
         }
+
+        // Mettre à jour la liste des providers effectivement utilisés
+        providers = aiResponses.map(r => r.provider)
       }
     }
   }
@@ -123,10 +132,10 @@ export async function processQuery(message: string, _userId?: string): Promise<F
   } else if (aiResponses.length === 1) {
     finalContent = aiResponses[0].content
   } else {
-    finalContent = 'Aucune réponse disponible. Vérifiez la configuration des API.'
+    finalContent = 'Aucune réponse disponible. Vérifiez la configuration des fournisseurs.'
   }
 
-  // 9. Ajouter le header FACTORY IA
+  // 9. Formater la réponse finale
   finalContent = formatFinalResponse(finalContent, strategy, providers, webSources)
 
   return {
@@ -145,16 +154,7 @@ function formatFinalResponse(
   providers: AIProvider[],
   webSources: WebSource[]
 ): string {
-  const providerNames = providers.map(p => {
-    const names: Record<AIProvider, string> = {
-      gemini: 'Gemini',
-      claude: 'Claude',
-      deepseek: 'DeepSeek',
-      mistral: 'Mistral',
-      groq: 'Groq',
-    }
-    return names[p]
-  })
+  const providerNames = providers.map(p => PROVIDER_NAMES[p] || p)
 
   const strategyLabel: Record<string, string> = {
     single_ai: 'IA Unique',
@@ -163,7 +163,6 @@ function formatFinalResponse(
   }
 
   let header = ''
-
   if (webSources.length > 0) {
     header += `**📚 ${webSources.length} source(s) web analysée(s)** | `
   }
