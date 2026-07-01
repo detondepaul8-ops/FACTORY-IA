@@ -1,7 +1,7 @@
 // AI Core Engine — Le cerveau de FACTORY IA
 // Orchestration multi-IA avec routage intelligent
 
-export type AIProvider = 'gemini' | 'claude' | 'deepseek' | 'mistral' | 'groq' | 'huggingface' | 'openrouter' | 'openai'
+export type AIProvider = 'gemini' | 'claude' | 'deepseek' | 'mistral' | 'groq' | 'huggingface' | 'openrouter' | 'openai' | 'cloudflare' | 'pollinations'
 export type QueryStrategy = 'single_ai' | 'multi_ai' | 'ai_plus_web'
 
 export type QueryIntent =
@@ -24,11 +24,12 @@ export interface ParsedQuery {
 }
 
 export interface AIResponse {
-  provider: AIProvider
+  provider: string
   content: string
   model: string
   latency: number
   tokens?: number
+  isError?: boolean
 }
 
 export interface WebSource {
@@ -41,14 +42,14 @@ export interface WebSource {
 export interface FinalResponse {
   content: string
   strategy: QueryStrategy
-  aiModelsUsed: AIProvider[]
+  aiModelsUsed: string[]
   webSources: WebSource[]
   totalLatency: number
   creditsCost: number
 }
 
 // Profils des IA — quand les utiliser
-export const AI_PROFILES: Record<AIProvider, {
+export const AI_PROFILES: Record<string, {
   name: string
   strengths: QueryIntent[]
   languages: string[]
@@ -86,7 +87,7 @@ export const AI_PROFILES: Record<AIProvider, {
   groq: {
     name: 'Groq',
     strengths: ['code', 'general', 'math'],
-    languages: ['en'],
+    languages: ['en', 'fr'],
     speed: 5,
     model: 'llama-3.3-70b-versatile',
   },
@@ -111,10 +112,24 @@ export const AI_PROFILES: Record<AIProvider, {
     speed: 3,
     model: 'gpt-4o-mini',
   },
+  cloudflare: {
+    name: 'Cloudflare Workers AI',
+    strengths: ['general', 'code', 'math'],
+    languages: ['en', 'fr'],
+    speed: 4,
+    model: '@cf/meta/llama-3.1-8b-instruct',
+  },
+  pollinations: {
+    name: 'Pollinations AI',
+    strengths: ['general', 'creative', 'writing'],
+    languages: ['en', 'fr', 'de', 'es'],
+    speed: 3,
+    model: 'openai',
+  },
 }
 
 // Noms d'affichage
-export const PROVIDER_NAMES: Record<AIProvider, string> = {
+export const PROVIDER_NAMES: Record<string, string> = {
   gemini: 'Gemini',
   claude: 'Claude',
   deepseek: 'DeepSeek',
@@ -123,6 +138,8 @@ export const PROVIDER_NAMES: Record<AIProvider, string> = {
   huggingface: 'HuggingFace',
   openrouter: 'OpenRouter',
   openai: 'OpenAI',
+  cloudflare: 'Cloudflare Workers AI',
+  pollinations: 'Pollinations AI',
 }
 
 // Coûts en crédits par stratégie

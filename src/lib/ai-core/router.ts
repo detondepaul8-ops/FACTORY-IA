@@ -99,11 +99,11 @@ export function decideStrategy(query: ParsedQuery): QueryStrategy {
 }
 
 // Sélectionne le(s) meilleur(s) IA pour la requête
-export function selectProviders(query: ParsedQuery, strategy: QueryStrategy): AIProvider[] {
+export function selectProviders(query: ParsedQuery, strategy: QueryStrategy): string[] {
   const { intent, language, urgency } = query
 
   // Score chaque provider
-  const scored = (Object.entries(AI_PROFILES) as [AIProvider, typeof AI_PROFILES[AIProvider]][])
+  const scored = Object.entries(AI_PROFILES)
     .map(([id, profile]) => {
       let score = 0
       // Force correspondant à l'intention
@@ -119,7 +119,7 @@ export function selectProviders(query: ParsedQuery, strategy: QueryStrategy): AI
     .sort((a, b) => b.score - a.score)
 
   if (strategy === 'single_ai') {
-    return [scored[0].id]
+    return [scored[0]?.id || 'gemini']
   }
 
   // Multi-IA ou AI+Web : prendre les 2-3 meilleurs
@@ -128,6 +128,6 @@ export function selectProviders(query: ParsedQuery, strategy: QueryStrategy): AI
 }
 
 // Sélectionne le provider principal pour une requête simple
-export function selectPrimaryProvider(query: ParsedQuery): AIProvider {
+export function selectPrimaryProvider(query: ParsedQuery): string {
   return selectProviders(query, 'single_ai')[0]
 }
