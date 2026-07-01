@@ -224,8 +224,8 @@ async function handleImageGeneration(query: ParsedQuery, totalStart: number): Pr
 function extractImagePrompt(text: string): string {
   // Supprimer les verbes de demande
   let prompt = text
-    .replace(/^(crée|génère|dessine|produis|fait|imagine|visualise|montre)\s+(une?\s+)?(image|photo|portrait|illustration|logo|affiche|icône|bannière)\s+(de\s+|d'/i, '')
-    .replace(/^(créer|générer|dessiner|produire|faire|imaginer|visualiser|montrer)\s+(une?\s+)?(image|photo|portrait|illustration|logo|affiche|icône|bannière)\s+(de\s+|d'/i, '')
+    .replace(/^(crée|génère|dessine|produis|fait|imagine|visualise|montre)\s+(une?\s+)?(image|photo|portrait|illustration|logo|affiche|icône|bannière)\s+(de\s+|d\u0027)/i, '')
+    .replace(/^(créer|générer|dessiner|produire|faire|imaginer|visualiser|montrer)\s+(une?\s+)?(image|photo|portrait|illustration|logo|affiche|icône|bannière)\s+(de\s+|d\u0027)/i, '')
     .trim()
 
   if (prompt.length < 5) prompt = text // Si trop court, utiliser le texte original
