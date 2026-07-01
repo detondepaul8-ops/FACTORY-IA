@@ -14,6 +14,7 @@ import { queryGroq } from './providers/groq'
 import { queryHuggingFace } from './providers/huggingface'
 import { queryOpenRouter } from './providers/openrouter'
 import { queryOpenAI } from './providers/openai'
+import { queryCloudflare } from './providers/cloudflare'
 import { queryFallback } from './providers/fallback'
 import { searchGoogle, searchYouTube } from '../tools/search'
 
@@ -27,6 +28,7 @@ const PROVIDERS: Record<string, (msg: string) => Promise<AIResponse>> = {
   huggingface: queryHuggingFace,
   openrouter: queryOpenRouter,
   openai: queryOpenAI,
+  cloudflare: queryCloudflare,
 }
 
 // Vérifie si un provider est disponible (actif + clé + healthy)
