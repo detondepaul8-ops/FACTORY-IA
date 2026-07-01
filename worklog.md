@@ -44,3 +44,31 @@ Stage Summary:
 - Vercel deployment successful: https://factory-ia.vercel.app
 - Groq provider shows active in DB but key returns 403 — needs a valid Groq API key
 - User-supplied csk- key and UUID 3768fbd1-... did not match any known provider format
+
+---
+Task ID: 3
+Agent: Main Agent
+Task: Corriger le mode démo — rendre les appels IA réels fonctionnels
+
+Work Log:
+- ANALYSE: Identifié 6 problèmes racines causant le mode démo
+- PB1: queryFallback utilisait z-ai-web-dev-sdk qui échoue sur Vercel → mode démo
+- PB2: AIProvider type ne contenait pas 'cloudflare' ni 'pollinations'
+- PB3: AI_PROFILES manquait cloudflare et pollinations → jamais sélectionnés par le routeur
+- PB4: db.ts avait log:['query'] → ralentissait la production
+- PB5: healthStatus='unhealthy' bloquait Gemini dans isProviderAvailable
+- PB6: Pollinations filtré car apiKey vide (provider gratuit)
+- CORRECTIONS: Réécriture complète de engine.ts, fallback.ts, registry.ts, types.ts
+- Supprimé le mode démo entièrement — remplacé par cascade fallback intelligent
+- Ajouté provider Pollinations (gratuit, sans clé)
+- Ajouté provider Cloudflare Workers AI
+- Reset Gemini healthStatus de 'unhealthy' à 'unknown'
+- Tests production: 3/3 réussis (Mistral + Groq répondent réellement)
+- Déployé sur Vercel + GitHub
+
+Stage Summary:
+- ✅ "Qui est le président du Bénin?" → Mistral répond Patrice Talon (11.7s)
+- ✅ "Quelle est la capitale du Japon?" → Groq répond Tokyo (2s)
+- ✅ "What is 2+2?" → Mistral répond (réponse réelle)
+- Plus aucun message "Mode Démo" — tous les appels sont réels
+- Fallback cascade: si un provider échoue, le suivant prend le relais automatiquement
