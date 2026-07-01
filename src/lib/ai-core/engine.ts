@@ -190,10 +190,7 @@ async function handleImageGeneration(query: ParsedQuery, totalStart: number): Pr
   try {
     // Utiliser Pollinations Image API (gratuit)
     const encodedPrompt = encodeURIComponent(imagePrompt)
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true`
-
-    // Vérifier que l'URL est accessible
-    const res = await fetch(imageUrl, { method: 'HEAD', signal: AbortSignal.timeout(10000) })
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true&seed=${Date.now()}`
 
     const content = `![${imagePrompt}](${imageUrl})\n\n**🖼️ Image générée** : *${imagePrompt}*\n\n> Via Pollinations AI (gratuit)`
 
@@ -206,12 +203,11 @@ async function handleImageGeneration(query: ParsedQuery, totalStart: number): Pr
       creditsCost: 1,
     }
   } catch (error) {
-    // Fallback : donner le lien direct même si le check échoue
     const encodedPrompt = encodeURIComponent(imagePrompt)
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true`
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true&seed=${Date.now()}`
 
     return {
-      content: `**🧠 Génération d'image** | Modèles : Pollinations AI\n\n---\n\n![${imagePrompt}](${imageUrl})\n\n**🖼️ Image** : *${imagePrompt}*\n\n> L'image est en cours de génération. Rechargez si elle ne s'affiche pas.`,
+      content: `**🧠 Génération d'image** | Modèles : Pollinations AI\n\n---\n\n![${imagePrompt}](${imageUrl})\n\n**🖼️ Image** : *${imagePrompt}*\n\n> L'image est en cours de génération. Si elle ne s'affiche pas, [cliquez ici](${imageUrl}).`,
       strategy: 'image_generation',
       aiModelsUsed: ['pollinations'],
       webSources: [],

@@ -249,8 +249,19 @@ function renderMd(text: string): string {
   html = html.replace(/^[\-•] (.+)$/gm, '<li class="ml-4 list-disc text-muted-foreground">$1</li>')
   html = html.replace(/^\d+\. (.+)$/gm, '<li class="ml-4 list-decimal text-muted-foreground">$1</li>')
 
-  // Paragraphs (lines that aren't already wrapped)
-  html = html.replace(/^(?!<[h|l|d|p|u])(.+)$/gm, '<p class="text-muted-foreground leading-relaxed">$1</p>')
+  // Blockquotes (> text est devenu &gt; text après l'échappement HTML)
+  html = html.replace(/^&gt; (.+)$/gm, '<blockquote class="border-l-2 border-factory-accent/40 pl-3 my-2 text-muted-foreground/80 italic">$1</blockquote>')
+
+  // Horizontal rules
+  html = html.replace(/^---$/gm, '<hr class="border-factory-border/40 my-4" />')
+
+  // Images ![alt](url)
+  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g,
+    (_m, alt, src) => `<div class="my-3 rounded-xl overflow-hidden border border-factory-border/50 bg-factory-card/50"><img src="${src}" alt="${alt}" class="w-full h-auto rounded-xl" loading="lazy" onerror="this.parentElement.innerHTML='<div class=\\'p-6 text-center text-sm text-red-400\\'>Erreur de chargement de l\\'image. <a href=\\'${src}\\' target=\\'_blank\\' class=\\'underline\\'>Ouvrir dans un nouvel onglet</a></div>'" /></div>`
+  )
+
+  // Paragraphs (lines that aren't already wrapped in HTML tags)
+  html = html.replace(/^(?!(?:<h|<li|<di|<pr|<bl|<ul|<ol|<hr|<im|<p ))(.+)$/gm, '<p class="text-muted-foreground leading-relaxed">$1</p>')
 
   // Clean up excessive newlines
   html = html.replace(/<p class="text-muted-foreground leading-relaxed"><\/p>/g, '')
