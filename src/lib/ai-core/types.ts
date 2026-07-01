@@ -1,8 +1,7 @@
-// AI Core Engine — Le cerveau de FACTORY IA
-// Orchestration multi-IA avec routage intelligent
+// AI Core Engine — Types du cerveau de FACTORY IA
 
 export type AIProvider = 'gemini' | 'claude' | 'deepseek' | 'mistral' | 'groq' | 'huggingface' | 'openrouter' | 'openai' | 'cloudflare' | 'pollinations'
-export type QueryStrategy = 'single_ai' | 'multi_ai' | 'ai_plus_web'
+export type QueryStrategy = 'single_ai' | 'multi_ai' | 'ai_plus_web' | 'image_generation'
 
 export type QueryIntent =
   | 'code'
@@ -12,6 +11,7 @@ export type QueryIntent =
   | 'research'
   | 'math'
   | 'creative'
+  | 'image_generation'
   | 'general'
 
 export interface ParsedQuery {
@@ -19,6 +19,9 @@ export interface ParsedQuery {
   intent: QueryIntent
   language: string
   requiresWeb: boolean
+  isNewsQuery: boolean       // Demande une info temporelle
+  isImageRequest: boolean    // Demande de génération d'image
+  isContestation: boolean    // L'utilisateur conteste une réponse
   urgency: 'low' | 'medium' | 'high'
   complexity: 'simple' | 'moderate' | 'complex'
 }
@@ -30,6 +33,22 @@ export interface AIResponse {
   latency: number
   tokens?: number
   isError?: boolean
+}
+
+export interface ResponseScore {
+  relevance: number      // 0-100: répond à la question
+  accuracy: number       // 0-100: exactitude
+  freshness: number      // 0-100: données récentes
+  completeness: number   // 0-100: réponse complète
+  presentation: number   // 0-100: qualité de présentation
+  total: number          // Moyenne pondérée
+}
+
+export interface QualityResult {
+  passed: boolean
+  score: ResponseScore
+  issues: string[]
+  suggestion: string
 }
 
 export interface WebSource {
@@ -46,6 +65,8 @@ export interface FinalResponse {
   webSources: WebSource[]
   totalLatency: number
   creditsCost: number
+  qualityScore?: ResponseScore
+  wasRetried?: boolean
 }
 
 // Profils des IA — quand les utiliser
@@ -55,13 +76,15 @@ export const AI_PROFILES: Record<string, {
   languages: string[]
   speed: number
   model: string
+  quality: number  // 1-5 score de qualité global
 }> = {
   gemini: {
     name: 'Google Gemini',
-    strengths: ['general', 'analysis', 'research', 'math', 'translation'],
+    strengths: ['general', 'analysis', 'research', 'math', 'translation', 'code'],
     languages: ['fr', 'en', 'de', 'es', 'zh', 'ja'],
     speed: 3,
     model: 'gemini-2.5-flash',
+    quality: 5,
   },
   claude: {
     name: 'Anthropic Claude',
@@ -69,6 +92,7 @@ export const AI_PROFILES: Record<string, {
     languages: ['en', 'fr', 'de', 'es'],
     speed: 2,
     model: 'claude-sonnet-4-20250514',
+    quality: 5,
   },
   deepseek: {
     name: 'DeepSeek',
@@ -76,13 +100,15 @@ export const AI_PROFILES: Record<string, {
     languages: ['zh', 'en'],
     speed: 3,
     model: 'deepseek-chat',
+    quality: 4,
   },
   mistral: {
     name: 'Mistral AI',
-    strengths: ['writing', 'general', 'translation', 'creative'],
+    strengths: ['writing', 'general', 'translation', 'creative', 'analysis'],
     languages: ['fr', 'en', 'de', 'es', 'it'],
     speed: 4,
     model: 'mistral-large-latest',
+    quality: 4,
   },
   groq: {
     name: 'Groq',
@@ -90,6 +116,7 @@ export const AI_PROFILES: Record<string, {
     languages: ['en', 'fr'],
     speed: 5,
     model: 'llama-3.3-70b-versatile',
+    quality: 3,
   },
   huggingface: {
     name: 'HuggingFace',
@@ -97,6 +124,7 @@ export const AI_PROFILES: Record<string, {
     languages: ['en', 'fr'],
     speed: 2,
     model: 'mistralai/Mistral-7B-Instruct-v0.3',
+    quality: 2,
   },
   openrouter: {
     name: 'OpenRouter',
@@ -104,6 +132,7 @@ export const AI_PROFILES: Record<string, {
     languages: ['en', 'fr', 'de', 'es'],
     speed: 3,
     model: 'anthropic/claude-sonnet-4-20250514',
+    quality: 5,
   },
   openai: {
     name: 'OpenAI',
@@ -111,6 +140,7 @@ export const AI_PROFILES: Record<string, {
     languages: ['en', 'fr', 'de', 'es'],
     speed: 3,
     model: 'gpt-4o-mini',
+    quality: 4,
   },
   cloudflare: {
     name: 'Cloudflare Workers AI',
@@ -118,6 +148,7 @@ export const AI_PROFILES: Record<string, {
     languages: ['en', 'fr'],
     speed: 4,
     model: '@cf/meta/llama-3.1-8b-instruct',
+    quality: 2,
   },
   pollinations: {
     name: 'Pollinations AI',
@@ -125,6 +156,7 @@ export const AI_PROFILES: Record<string, {
     languages: ['en', 'fr', 'de', 'es'],
     speed: 3,
     model: 'openai',
+    quality: 3,
   },
 }
 
@@ -147,4 +179,5 @@ export const CREDITS_COST: Record<QueryStrategy, number> = {
   single_ai: 1,
   multi_ai: 3,
   ai_plus_web: 2,
+  image_generation: 1,
 }

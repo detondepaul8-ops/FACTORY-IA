@@ -1,10 +1,10 @@
-// ENGINE PRINCIPAL — Orchestration complète via Provider Registry
-// Le cerveau qui coordonne tout
+// ENGINE v2 — Orchestrateur intelligent FACTORY IA
+// Qualité, cohérence, actualité, images, contestations
 
-import type { FinalResponse, AIResponse, WebSource } from './types'
+import type { FinalResponse, AIResponse, WebSource, ParsedQuery } from './types'
 import { CREDITS_COST, PROVIDER_NAMES } from './types'
 import { parseQuery, decideStrategy, selectProviders } from './router'
-import { compareResponses } from './compare'
+import { scoreResponse, selectBestResponse, checkConsistency } from './quality-gate'
 import { getActiveProviders, type ProviderInternal } from './providers/registry'
 import { queryGemini } from './providers/gemini'
 import { queryClaude } from './providers/claude'
@@ -19,7 +19,6 @@ import { queryPollinations } from './providers/pollinations'
 import { queryFallback } from './providers/fallback'
 import { searchGoogle, searchYouTube } from '../tools/search'
 
-// Map provider slug → function de requête
 const PROVIDERS: Record<string, (msg: string) => Promise<AIResponse>> = {
   gemini: queryGemini,
   claude: queryClaude,
@@ -33,152 +32,146 @@ const PROVIDERS: Record<string, (msg: string) => Promise<AIResponse>> = {
   pollinations: queryPollinations,
 }
 
+// ─── Point d'entrée principal ─────────────────────────────────────────────
 export async function processQuery(message: string, _userId?: string): Promise<FinalResponse> {
   const totalStart = Date.now()
   let webSources: WebSource[] = []
-  let strategy = 'single_ai'
+  let strategy: string = 'single_ai'
   let usedProviders: string[] = []
+  let qualityScore: any = undefined
+  let wasRetried = false
 
   try {
-    // 1. Analyser la requête
+    // 1. Analyser la requête en profondeur
     const query = parseQuery(message)
     strategy = decideStrategy(query)
 
-    // 2. Obtenir tous les providers actifs depuis la DB (avec clé)
+    console.log(`[Engine v2] intent=${query.intent} news=${query.isNewsQuery} image=${query.isImageRequest} contest=${query.isContestation} web=${query.requiresWeb} strategy=${strategy}`)
+
+    // 2. GÉNÉRATION D'IMAGE — traitement spécial
+    if (query.isImageRequest) {
+      return await handleImageGeneration(query, totalStart)
+    }
+
+    // 3. Obtenir les providers actifs
     let dbProviders: ProviderInternal[] = []
     try {
       dbProviders = await getActiveProviders()
-      console.log(`[Engine] ${dbProviders.length} providers actifs en DB: ${dbProviders.map(p => p.slug).join(', ')}`)
     } catch (dbErr) {
-      console.error('[Engine] Erreur DB, fallback sur tous les providers:', dbErr)
+      console.error('[Engine v2] Erreur DB:', dbErr)
     }
 
-    // 3. Sélectionner les providers selon la requête
-    let targetSlugs = selectProviders(query, strategy)
-
-    // 4. Filtrer : ne garder que ceux actifs en DB avec clé
+    // 4. Sélectionner les providers
+    let targetSlugs = selectProviders(query, strategy as any)
     const dbSlugs = new Set(dbProviders.map(p => p.slug))
-    const available = targetSlugs.filter(s => dbSlugs.has(s))
+    let available = targetSlugs.filter(s => dbSlugs.has(s))
 
-    // 5. Si aucun provider suggéré n'est dispo, utiliser TOUS les providers actifs de la DB
-    const callableSlugs = available.length > 0
-      ? available
-      : dbProviders.map(p => p.slug)
-
-    // 6. Ne garder que ceux qui ont une fonction de requête
-    const callable = callableSlugs.filter(s => PROVIDERS[s])
-
-    console.log(`[Engine] Stratégie: ${strategy}, Target: [${targetSlugs.join(',')}], Dispo: [${callable.join(',')}]`)
-
-    // 7. Recherche web si nécessaire
-    if (strategy === 'ai_plus_web' || query.requiresWeb) {
-      try {
-        const [googleResults, youtubeResults] = await Promise.allSettled([
-          searchGoogle(query.text),
-          searchYouTube(query.text),
-        ])
-        if (googleResults.status === 'fulfilled') webSources.push(...googleResults.value)
-        if (youtubeResults.status === 'fulfilled') webSources.push(...youtubeResults.value)
-      } catch {
-        // Recherche web échouée — on continue sans
-      }
+    // Si aucun des sélectionnés n'est dispo, prendre tous les actifs
+    if (available.length === 0) {
+      available = dbProviders.map(p => p.slug).filter(s => PROVIDERS[s])
     }
 
-    // 8. Enrichir le message avec les sources web
+    // Pour l'actualité et les contestations : forcer au moins 2 providers
+    if ((query.isNewsQuery || query.isContestation) && available.length < 2) {
+      const extraProviders = dbProviders
+        .map(p => p.slug)
+        .filter(s => PROVIDERS[s] && !available.includes(s))
+      available.push(...extraProviders.slice(0, 2 - available.length))
+    }
+
+    console.log(`[Engine v2] Providers sélectionnés: [${available.join(', ')}]`)
+
+    // 5. Recherche web (obligatoire pour l'actualité et les contestations)
+    if (query.isNewsQuery || query.isContestation || query.requiresWeb) {
+      webSources = await performWebSearch(query.text, query.isContestation)
+      console.log(`[Engine v2] ${webSources.length} sources web trouvées`)
+    }
+
+    // 6. Enrichir le message avec les sources web
     let enrichedMessage = message
     if (webSources.length > 0) {
-      const context = webSources.slice(0, 5)
-        .map((s, i) => `${i + 1}. **${s.title}** (${s.url})\n   ${s.snippet}`)
-        .join('\n')
-      enrichedMessage = `${message}\n\n---\n**Sources web trouvées (utilise-les pour enrichir ta réponse) :**\n${context}\n---`
+      enrichedMessage = buildEnrichedMessage(message, webSources, query)
     }
 
-    // 9. Exécuter les appels IA
-    let aiResponses: AIResponse[] = []
+    // 7. Pour les contestations : ajouter une instruction spéciale
+    if (query.isContestation) {
+      enrichedMessage = `[CONTESTATION UTILISATEUR] L'utilisateur indique que la réponse précédente était incorrecte. Tu DOIS vérifier tes informations avec les sources web fournies et donner une réponse différente, plus précise et plus récente.\n\n${enrichedMessage}`
+    }
 
-    if (callable.length === 0) {
-      // Aucun provider — utiliser le fallback en cascade
-      console.warn('[Engine] Aucun provider callable, utilisation du fallback cascade')
-      const response = await queryFallback(enrichedMessage)
-      aiResponses = [response]
-      usedProviders = [response.provider]
-    } else {
-      // Appels parallèles avec timeout
-      const calls = callable.map(async (slug) => {
-        try {
-          const result = await PROVIDERS[slug](enrichedMessage)
-          console.log(`[Engine] ✅ ${slug} a répondu en ${result.latency}ms`)
-          return result
-        } catch (err) {
-          console.error(`[Engine] ❌ ${slug} a échoué:`, err instanceof Error ? err.message : err)
-          return null
-        }
-      })
+    // 8. Appeler les providers
+    let aiResponses = await callProviders(available, enrichedMessage)
 
-      const results = await Promise.allSettled(calls)
+    // 9. QUALITY GATE — évaluer chaque réponse
+    const { response: bestResponse, quality } = selectBestResponse(aiResponses, query, webSources)
+    qualityScore = quality.score
+    usedProviders = aiResponses.map(r => r.provider)
 
-      for (const result of results) {
-        if (result.status === 'fulfilled' && result.value) {
-          // Détecter les réponses d'erreur (certains providers retournent du contenu d'erreur au lieu de throw)
-          const content = result.value.content || ''
-          const isError = result.value.isError || content.startsWith('[Erreur') || content.startsWith('**⚠️')
-          if (!isError) {
-            aiResponses.push(result.value)
-          } else {
-            console.warn(`[Engine] ⚠️ ${result.value.provider} a retourné une erreur: ${content.substring(0, 100)}`)
+    console.log(`[Engine v2] Qualité: ${quality.score.total}/100, issues: [${quality.issues.join(', ')}]`)
+
+    // 10. Si la qualité est insuffisante → RETRY avec le feedback
+    if (!quality.passed && quality.score.total < 30 && aiResponses.length >= 2) {
+      console.log(`[Engine v2] Qualité insuffisante, retry...`)
+      wasRetried = true
+
+      // Retenter avec un provider différent
+      const usedSlugs = new Set(aiResponses.map(r => r.provider))
+      const retryProviders = dbProviders
+        .map(p => p.slug)
+        .filter(s => PROVIDERS[s] && !usedSlugs.has(s))
+
+      if (retryProviders.length > 0) {
+        const retryMessage = `[QUALITÉ INSUFFISANTE] La réponse précédente était de mauvaise qualité. Problèmes: ${quality.issues.join('; ')}. Donne une réponse meilleure, plus directe et plus pertinente.\n\n${enrichedMessage}`
+
+        const retryResponses = await callProviders(retryProviders.slice(0, 2), retryMessage)
+        if (retryResponses.length > 0) {
+          const { response: retryBest, quality: retryQuality } = selectBestResponse(retryResponses, query, webSources)
+          if (retryQuality.score.total > quality.score.total) {
+            aiResponses = retryResponses
+            qualityScore = retryQuality.score
+            console.log(`[Engine v2] Retry amélioré: ${retryQuality.score.total}/100`)
           }
         }
       }
+    }
 
-      usedProviders = aiResponses.map(r => r.provider)
-
-      // Si tous ont échoué, essayer le fallback en cascade
-      if (aiResponses.length === 0) {
-        console.warn('[Engine] Tous les providers ont échoué, fallback cascade')
-        const fallbackResp = await queryFallback(enrichedMessage)
-        aiResponses = [fallbackResp]
-        usedProviders = [fallbackResp.provider]
+    // 11. Vérification de cohérence entre réponses
+    if (aiResponses.length > 1) {
+      const { isConsistent, conflictInfo } = checkConsistency(aiResponses, query)
+      if (!isConsistent && conflictInfo) {
+        console.log(`[Engine v2] Conflit détecté: ${conflictInfo}`)
       }
     }
 
-    // 10. Sélectionner la meilleure réponse
-    let finalContent: string
-    if (aiResponses.length > 1) {
-      const comparison = compareResponses(aiResponses as any[])
-      finalContent = comparison.bestResponse.content
-    } else if (aiResponses.length === 1) {
-      finalContent = aiResponses[0].content
-    } else {
-      finalContent = 'Aucune réponse disponible. Vérifiez la configuration des fournisseurs.'
-    }
-
-    // 11. Formater la réponse finale
-    finalContent = formatFinalResponse(finalContent, strategy, usedProviders, webSources)
+    // 12. Formater la réponse finale
+    const finalContent = aiResponses.length > 0
+      ? formatFinalResponse(aiResponses[0].content, strategy, usedProviders, webSources, query, qualityScore)
+      : 'Aucune réponse disponible.'
 
     return {
       content: finalContent,
-      strategy,
+      strategy: strategy as any,
       aiModelsUsed: usedProviders,
       webSources,
       totalLatency: Date.now() - totalStart,
-      creditsCost: CREDITS_COST[strategy],
+      creditsCost: CREDITS_COST[strategy as keyof typeof CREDITS_COST] || 1,
+      qualityScore,
+      wasRetried,
     }
   } catch (error) {
-    // Erreur globale — tenter le fallback en dernier recours
-    console.error('[Engine] Erreur globale:', error)
+    console.error('[Engine v2] Erreur globale:', error)
     try {
       const response = await queryFallback(message)
       return {
-        content: formatFinalResponse(response.content, strategy, [response.provider], webSources),
-        strategy,
+        content: formatFinalResponse(response.content, strategy, [response.provider], webSources, parseQuery(message), undefined),
+        strategy: strategy as any,
         aiModelsUsed: [response.provider],
         webSources,
         totalLatency: Date.now() - totalStart,
-        creditsCost: CREDITS_COST[strategy],
+        creditsCost: 1,
       }
     } catch {
       return {
-        content: `**❌ Erreur interne du serveur.**\n\n${error instanceof Error ? error.message : 'Erreur inconnue'}\n\nVeuillez réessayer.`,
+        content: `**❌ Erreur interne.** ${error instanceof Error ? error.message : ''}`,
         strategy: 'single_ai',
         aiModelsUsed: ['error'],
         webSources: [],
@@ -189,11 +182,131 @@ export async function processQuery(message: string, _userId?: string): Promise<F
   }
 }
 
+// ─── Génération d'images ─────────────────────────────────────────────────
+async function handleImageGeneration(query: ParsedQuery, totalStart: number): Promise<FinalResponse> {
+  // Extraire le prompt d'image de la question
+  const imagePrompt = extractImagePrompt(query.text)
+
+  try {
+    // Utiliser Pollinations Image API (gratuit)
+    const encodedPrompt = encodeURIComponent(imagePrompt)
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true`
+
+    // Vérifier que l'URL est accessible
+    const res = await fetch(imageUrl, { method: 'HEAD', signal: AbortSignal.timeout(10000) })
+
+    const content = `![${imagePrompt}](${imageUrl})\n\n**🖼️ Image générée** : *${imagePrompt}*\n\n> Via Pollinations AI (gratuit)`
+
+    return {
+      content: `**🧠 Génération d'image** | Modèles : Pollinations AI\n\n---\n\n${content}`,
+      strategy: 'image_generation',
+      aiModelsUsed: ['pollinations'],
+      webSources: [],
+      totalLatency: Date.now() - totalStart,
+      creditsCost: 1,
+    }
+  } catch (error) {
+    // Fallback : donner le lien direct même si le check échoue
+    const encodedPrompt = encodeURIComponent(imagePrompt)
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true`
+
+    return {
+      content: `**🧠 Génération d'image** | Modèles : Pollinations AI\n\n---\n\n![${imagePrompt}](${imageUrl})\n\n**🖼️ Image** : *${imagePrompt}*\n\n> L'image est en cours de génération. Rechargez si elle ne s'affiche pas.`,
+      strategy: 'image_generation',
+      aiModelsUsed: ['pollinations'],
+      webSources: [],
+      totalLatency: Date.now() - totalStart,
+      creditsCost: 1,
+    }
+  }
+}
+
+function extractImagePrompt(text: string): string {
+  // Supprimer les verbes de demande
+  let prompt = text
+    .replace(/^(crée|génère|dessine|produis|fait|imagine|visualise|montre)\s+(une?\s+)?(image|photo|portrait|illustration|logo|affiche|icône|bannière)\s+(de\s+|d'/i, '')
+    .replace(/^(créer|générer|dessiner|produire|faire|imaginer|visualiser|montrer)\s+(une?\s+)?(image|photo|portrait|illustration|logo|affiche|icône|bannière)\s+(de\s+|d'/i, '')
+    .trim()
+
+  if (prompt.length < 5) prompt = text // Si trop court, utiliser le texte original
+  return prompt
+}
+
+// ─── Recherche web ────────────────────────────────────────────────────────
+async function performWebSearch(query: string, isContestation: boolean): Promise<WebSource[]> {
+  const sources: WebSource[] = []
+
+  // Pour les contestations, varier la requête de recherche
+  const searchQuery = isContestation
+    ? `${query} vérifié mise à jour 2025 2026`
+    : query
+
+  try {
+    const [googleResults, youtubeResults] = await Promise.allSettled([
+      searchGoogle(searchQuery),
+      searchYouTube(searchQuery),
+    ])
+    if (googleResults.status === 'fulfilled') sources.push(...googleResults.value)
+    if (youtubeResults.status === 'fulfilled') sources.push(...youtubeResults.value)
+  } catch {
+    // Search failed — continue without
+  }
+
+  return sources
+}
+
+// ─── Construction du message enrichi ──────────────────────────────────────
+function buildEnrichedMessage(message: string, sources: WebSource[], query: ParsedQuery): string {
+  const context = sources.slice(0, 5)
+    .map((s, i) => `${i + 1}. **${s.title}** (${s.url})\n   ${s.snippet}`)
+    .join('\n')
+
+  let instruction = '**Sources web trouvées (utilise-les pour enrichir ta réponse) :**'
+
+  if (query.isNewsQuery) {
+    instruction = '**⚠️ QUESTION D\'ACTUALITÉ** — Les sources web ci-dessous contiennent des informations récentes. Utilise OBLIGATOIREMENT ces sources pour répondre. Si les sources contredisent tes connaissances, privilégie les informations des sources web les plus récentes :**'
+  }
+
+  if (query.isContestation) {
+    instruction = '**⚠️ CONTESTATION** — L\'utilisateur a indiqué que la réponse précédente était incorrecte. Les sources web ci-dessous doivent te permettre de donner une réponse VÉRIFIÉE et DIFFÉRENTE de la précédente :**'
+  }
+
+  return `${message}\n\n---\n${instruction}\n${context}\n---`
+}
+
+// ─── Appels providers parallèles ──────────────────────────────────────────
+async function callProviders(slugs: string[], message: string): Promise<AIResponse[]> {
+  const results = await Promise.allSettled(
+    slugs.map(async (slug) => {
+      try {
+        const result = await PROVIDERS[slug](message)
+        const isError = result.isError || (result.content || '').startsWith('[Erreur')
+        if (!isError) {
+          console.log(`[Engine v2] ✅ ${slug} (${result.latency}ms)`)
+          return result
+        }
+        console.warn(`[Engine v2] ⚠️ ${slug} erreur: ${(result.content || '').substring(0, 80)}`)
+        return null
+      } catch (err) {
+        console.error(`[Engine v2] ❌ ${slug} échoué:`, err instanceof Error ? err.message : err)
+        return null
+      }
+    })
+  )
+
+  return results
+    .filter((r): r is PromiseFulfilledResult<AIResponse> => r.status === 'fulfilled' && r.value !== null)
+    .map(r => r.value)
+}
+
+// ─── Formatage final ──────────────────────────────────────────────────────
 function formatFinalResponse(
   content: string,
   strategy: string,
   providers: string[],
-  webSources: WebSource[]
+  webSources: WebSource[],
+  query?: ParsedQuery,
+  qualityScore?: any
 ): string {
   const providerNames = providers.map(p => PROVIDER_NAMES[p] || p)
 
@@ -201,13 +314,20 @@ function formatFinalResponse(
     single_ai: 'IA Unique',
     multi_ai: 'Multi-IA Comparée',
     ai_plus_web: 'IA + Recherche Web',
+    image_generation: 'Génération d\'image',
   }
 
   let header = ''
   if (webSources.length > 0) {
-    header += `**📚 ${webSources.length} source(s) web analysée(s)** | `
+    header += `**📚 ${webSources.length} source(s) web** | `
   }
-  header += `**🧠 ${strategyLabel[strategy]}** | Modèles : ${providerNames.join(', ')}`
+  if (query?.isNewsQuery) {
+    header += '🕐 **Info actualité** | '
+  }
+  if (query?.isContestation) {
+    header += '🔄 **Vérifié** | '
+  }
+  header += `**🧠 ${strategyLabel[strategy] || strategy}** | Modèles : ${providerNames.join(', ')}`
 
   return `${header}\n\n---\n\n${content}`
 }
