@@ -34,11 +34,12 @@ export async function POST(request: NextRequest) {
     const user = await authenticate(request)
     if (!user) return NextResponse.json({ error: 'Non authentifié.' }, { status: 401 })
 
-    // Limiter à 5 clés par utilisateur
+    // Limiter à 5 clés par utilisateur (admins exempts)
     const keyCount = await db.apiKey.count({ where: { userId: user.id } })
-    if (keyCount >= 5) {
+    const keyLimit = user.role === 'admin' ? 999 : 5
+    if (keyCount >= keyLimit) {
       return NextResponse.json(
-        { error: 'Limite de 5 clés API atteinte.' },
+        { error: user.role === 'admin' ? 'Limite de 999 clés API atteinte.' : 'Limite de 5 clés API atteinte.' },
         { status: 400 }
       )
     }

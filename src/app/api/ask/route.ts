@@ -50,10 +50,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Vérifier les crédits si utilisateur identifié
+    // Vérifier les crédits si utilisateur identifié (admins exempts)
+    let isAdmin = false
     if (userId) {
       const user = await db.user.findUnique({ where: { id: userId } })
-      if (user && user.credits < 1) {
+      isAdmin = user?.role === 'admin'
+      if (user && !isAdmin && user.credits < 1) {
         return NextResponse.json(
           { error: 'Crédits insuffisants. Veuillez recharger votre compte.' },
           { status: 402 }
@@ -64,19 +66,22 @@ export async function POST(request: NextRequest) {
     // Traiter la requête avec l'AI Core Engine
     const result = await processQuery(message, userId)
 
-    // Déduire les crédits
+    // Déduire les crédits (admins exempts de déduction)
     if (userId) {
+      const finalCreditsCost = isAdmin ? 0 : result.creditsCost
       await db.$transaction([
         db.user.update({
           where: { id: userId },
-          data: { credits: { decrement: result.creditsCost } },
+          data: { credits: { decrement: finalCreditsCost } },
         }),
         db.creditTransaction.create({
           data: {
             userId,
-            amount: -result.creditsCost,
-            type: 'consumption',
-            description: `Requête IA (${result.strategy}) - ${result.aiModelsUsed.join(', ')}`,
+            amount: -finalCreditsCost,
+            type: isAdmin ? 'admin_test' : 'consumption',
+            description: isAdmin
+              ? `Requête IA admin test (${result.strategy}) - Gratuit`
+              : `Requête IA (${result.strategy}) - ${result.aiModelsUsed.join(', ')}`,
           },
         }),
         db.queryLog.create({
@@ -87,7 +92,7 @@ export async function POST(request: NextRequest) {
             strategy: result.strategy,
             aiModelsUsed: JSON.stringify(result.aiModelsUsed),
             webSources: result.webSources.length > 0 ? JSON.stringify(result.webSources) : null,
-            creditsCost: result.creditsCost,
+            creditsCost: finalCreditsCost,
             responseTime: result.totalLatency,
           },
         }),
