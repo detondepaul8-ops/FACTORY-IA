@@ -1,7 +1,7 @@
 // AI Core Engine — Le cerveau de FACTORY IA
 // Orchestration multi-IA avec routage intelligent
 
-export type AIProvider = 'gemini' | 'claude' | 'deepseek' | 'mistral' | 'groq' | 'huggingface' | 'openrouter' | 'openai'
+export type AIProvider = 'gemini' | 'claude' | 'deepseek' | 'mistral' | 'groq' | 'huggingface' | 'openrouter' | 'openai' | 'zai'
 export type QueryStrategy = 'single_ai' | 'multi_ai' | 'ai_plus_web'
 
 export type QueryIntent =
@@ -111,7 +111,13 @@ export const AI_PROFILES: Record<AIProvider, {
     speed: 3,
     model: 'gpt-4o-mini',
   },
-}
+  zai: {
+    name: 'Z IA (GLM-4-Plus)',
+    strengths: ['writing', 'analysis', 'code', 'creative', 'general', 'translation', 'math', 'research'],
+    languages: ['fr', 'en', 'zh', 'de', 'es', 'ja'],
+    speed: 4,
+    model: 'glm-4-plus',
+  },
 
 // Noms d'affichage
 export const PROVIDER_NAMES: Record<AIProvider, string> = {
@@ -123,6 +129,7 @@ export const PROVIDER_NAMES: Record<AIProvider, string> = {
   huggingface: 'HuggingFace',
   openrouter: 'OpenRouter',
   openai: 'OpenAI',
+  zai: 'Z IA',
 }
 
 // Coûts en crédits par stratégie

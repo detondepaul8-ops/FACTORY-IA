@@ -15,6 +15,7 @@ import { queryHuggingFace } from './providers/huggingface'
 import { queryOpenRouter } from './providers/openrouter'
 import { queryOpenAI } from './providers/openai'
 import { queryFallback } from './providers/fallback'
+import { queryZAI } from './providers/zai'
 import { searchGoogle, searchYouTube } from '../tools/search'
 
 // Map provider slug → function de requête
@@ -27,6 +28,7 @@ const PROVIDERS: Record<string, (msg: string) => Promise<AIResponse>> = {
   huggingface: queryHuggingFace,
   openrouter: queryOpenRouter,
   openai: queryOpenAI,
+  zai: queryZAI,
 }
 
 // Vérifie si un provider est disponible (actif + clé + healthy)
