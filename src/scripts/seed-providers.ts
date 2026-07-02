@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client'
 
 const prisma = new PrismaClient()
 
+// Seed providers WITHOUT API keys — keys are managed via Supabase DB / Vercel env vars
 const PROVIDERS = [
   {
     slug: 'gemini',
@@ -15,7 +16,6 @@ const PROVIDERS = [
     strengths: JSON.stringify(['general', 'analysis', 'research', 'math', 'translation']),
     languages: JSON.stringify(['fr', 'en', 'de', 'es', 'zh', 'ja']),
     speed: 3,
-    apiKey: 'REDACTED_GCP_KEY',
   },
   {
     slug: 'groq',
@@ -29,7 +29,6 @@ const PROVIDERS = [
     strengths: JSON.stringify(['code', 'general', 'math']),
     languages: JSON.stringify(['en', 'fr']),
     speed: 5,
-    apiKey: 'REDACTED_GROQ_KEY',
   },
   {
     slug: 'mistral',
@@ -43,7 +42,6 @@ const PROVIDERS = [
     strengths: JSON.stringify(['writing', 'general', 'translation', 'creative']),
     languages: JSON.stringify(['fr', 'en', 'de', 'es', 'it']),
     speed: 4,
-    apiKey: 'mistr6aRw7P8ndWeEP2AfqEcLsndWSsqmLSD7al',
   },
   {
     slug: 'huggingface',
@@ -57,7 +55,6 @@ const PROVIDERS = [
     strengths: JSON.stringify(['code', 'general', 'creative']),
     languages: JSON.stringify(['en', 'fr']),
     speed: 2,
-    apiKey: 'fhf_veVuStmZELSymYAHliNRwiMluBBKBUOpXSace',
   },
   {
     slug: 'openrouter',
@@ -71,7 +68,6 @@ const PROVIDERS = [
     strengths: JSON.stringify(['general', 'code', 'writing', 'analysis']),
     languages: JSON.stringify(['en', 'fr', 'de', 'es']),
     speed: 3,
-    apiKey: 'REDACTED_OPENROUTER_KEY',
   },
   {
     slug: 'openai',
@@ -85,7 +81,6 @@ const PROVIDERS = [
     strengths: JSON.stringify(['writing', 'analysis', 'code', 'creative', 'general']),
     languages: JSON.stringify(['en', 'fr', 'de', 'es']),
     speed: 3,
-    apiKey: 'REDACTED_OPENAI_KEY',
   },
 ]
 
@@ -94,53 +89,32 @@ function encryptKey(key: string): string {
 }
 
 async function main() {
-  console.log('Seeding AI Providers...')
+  console.log('Seeding AI Providers (no keys — manage via DB or env)...')
 
   for (const p of PROVIDERS) {
     const existing = await prisma.aIProvider.findUnique({ where: { slug: p.slug } })
-
     if (existing) {
-      await prisma.aIProvider.update({
-        where: { slug: p.slug },
-        data: {
-          name: p.name,
-          description: p.description,
-          baseUrl: p.baseUrl,
-          defaultModel: p.defaultModel,
-          apiType: p.apiType,
-          authPrefix: p.authPrefix,
-          priority: p.priority,
-          strengths: p.strengths,
-          languages: p.languages,
-          speed: p.speed,
-          apiKeyEncrypted: encryptKey(p.apiKey),
-          updatedAt: new Date(),
-        },
-      })
-      console.log(`  Updated: ${p.slug}`)
-    } else {
-      await prisma.aIProvider.create({
-        data: {
-          slug: p.slug,
-          name: p.name,
-          description: p.description,
-          baseUrl: p.baseUrl,
-          defaultModel: p.defaultModel,
-          apiType: p.apiType,
-          authPrefix: p.authPrefix,
-          authHeader: p.apiType === 'gemini' ? 'key' : 'Authorization',
-          priority: p.priority,
-          strengths: p.strengths,
-          languages: p.languages,
-          speed: p.speed,
-          apiKeyEncrypted: encryptKey(p.apiKey),
-        },
-      })
-      console.log(`  Created: ${p.slug}`)
+      console.log(`  ⏭️  ${p.slug} already exists — skipping`)
+      continue
     }
+
+    await prisma.aIProvider.create({
+      data: {
+        ...p,
+        apiKeyEncrypted: '',  // Set via Supabase or admin panel
+        isActive: p.slug === 'pollinations',  // Only free providers active by default
+        authHeader: 'Authorization',
+      },
+    })
+    console.log(`  ✅ ${p.slug} seeded (key required)`)
   }
 
-  console.log('Done! 6 providers configured.')
+  console.log('\nDone. Set API keys via Supabase DB or admin panel.')
+  await prisma.$disconnect()
 }
 
-main().catch(console.error).finally(() => prisma.$disconnect())
+main().catch(async (e) => {
+  console.error(e)
+  await prisma.$disconnect()
+  process.exit(1)
+})

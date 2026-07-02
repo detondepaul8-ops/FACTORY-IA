@@ -1,9 +1,14 @@
 // ─── Provider Registry ────────────────────────────────────────────────────────
 // Système centralisé et sécurisé de gestion des fournisseurs IA
+<<<<<<< HEAD
 // Les clés ne sont JAMAIS exposées au frontend
 
 import { db } from '@/lib/db'
 import type { QueryIntent } from '@/lib/ai-core/types'
+=======
+
+import { db } from '@/lib/db'
+>>>>>>> 193a7f0736ab7f89bd2ff817723055c019ba95b3
 
 // Types publics (sans la clé API)
 export interface ProviderPublic {
@@ -15,7 +20,11 @@ export interface ProviderPublic {
   apiType: string
   isActive: boolean
   priority: number
+<<<<<<< HEAD
   strengths: QueryIntent[]
+=======
+  strengths: string[]
+>>>>>>> 193a7f0736ab7f89bd2ff817723055c019ba95b3
   languages: string[]
   speed: number
   healthStatus: 'healthy' | 'unhealthy' | 'unknown'
@@ -42,7 +51,11 @@ export interface ProviderInternal {
   authPrefix: string
   isActive: boolean
   priority: number
+<<<<<<< HEAD
   strengths: QueryIntent[]
+=======
+  strengths: string[]
+>>>>>>> 193a7f0736ab7f89bd2ff817723055c019ba95b3
   languages: string[]
   speed: number
   apiKey: string
@@ -54,8 +67,11 @@ let providerCache: ProviderInternal[] | null = null
 let cacheTimestamp = 0
 const CACHE_TTL = 30_000 // 30 secondes
 
+<<<<<<< HEAD
 // Chiffrement simple (en production, utiliser crypto AES-256)
 // Base64 encode/decode pour éviter la lecture en clair dans la DB
+=======
+>>>>>>> 193a7f0736ab7f89bd2ff817723055c019ba95b3
 export function encryptKey(key: string): string {
   return Buffer.from(key).toString('base64')
 }
@@ -68,6 +84,7 @@ export function decryptKey(encrypted: string): string {
 export async function getActiveProviders(): Promise<ProviderInternal[]> {
   const now = Date.now()
   if (providerCache && now - cacheTimestamp < CACHE_TTL) {
+<<<<<<< HEAD
     return providerCache.filter(p => p.isActive)
   }
 
@@ -100,6 +117,64 @@ export async function getActiveProviders(): Promise<ProviderInternal[]> {
 }
 
 // Invalider le cache (après modification admin)
+=======
+    return providerCache.filter(p => p.isActive && p.apiKey)
+  }
+
+  try {
+    const providers = await db.aIProvider.findMany({
+      where: { isActive: true },
+      orderBy: { priority: 'desc' },
+    })
+
+    providerCache = providers
+      .map(p => {
+        let apiKey = ''
+        try {
+          apiKey = p.apiKeyEncrypted ? decryptKey(p.apiKeyEncrypted) : ''
+        } catch {
+          apiKey = ''
+        }
+
+        return {
+          id: p.id,
+          slug: p.slug,
+          name: p.name,
+          description: p.description,
+          baseUrl: p.baseUrl,
+          defaultModel: p.defaultModel,
+          apiType: p.apiType,
+          authHeader: p.authHeader || 'Authorization',
+          authPrefix: p.authPrefix || 'Bearer ',
+          isActive: p.isActive,
+          priority: p.priority,
+          strengths: JSON.parse(p.strengths || '[]'),
+          languages: JSON.parse(p.languages || '[]'),
+          speed: p.speed,
+          apiKey,
+          healthStatus: p.healthStatus,
+        }
+      })
+      .filter(p => {
+        // Pollinations et autres providers gratuits n'ont pas besoin de clé
+        if (p.slug === 'pollinations') return p.isActive
+        return !!p.apiKey
+      })
+
+    cacheTimestamp = now
+    return providerCache
+  } catch (error) {
+    console.error('[Registry] Erreur de lecture DB:', error)
+    // Retourner le cache expiré si disponible
+    if (providerCache) {
+      return providerCache.filter(p => p.isActive && p.apiKey)
+    }
+    return []
+  }
+}
+
+// Invalider le cache
+>>>>>>> 193a7f0736ab7f89bd2ff817723055c019ba95b3
 export function invalidateProviderCache(): void {
   providerCache = null
   cacheTimestamp = 0
@@ -111,6 +186,7 @@ export async function getProvider(slug: string): Promise<ProviderInternal | null
   return providers.find(p => p.slug === slug) || null
 }
 
+<<<<<<< HEAD
 // Obtenir la clé API d'un fournisseur (serveur uniquement)
 export async function getApiKey(slug: string): Promise<string> {
   const provider = await getProvider(slug)
@@ -123,6 +199,13 @@ export async function isProviderAvailable(slug: string): Promise<boolean> {
   if (!provider) return false
   if (provider.healthStatus === 'unhealthy') return false
   return !!provider.apiKey
+=======
+// Vérifier si un provider est disponible
+// ⚠️ Plus de blocage sur healthStatus — on laisse l'appel échouer naturellement
+export async function isProviderAvailable(slug: string): Promise<boolean> {
+  const provider = await getProvider(slug)
+  return !!provider && !!provider.apiKey
+>>>>>>> 193a7f0736ab7f89bd2ff817723055c019ba95b3
 }
 
 // Mettre à jour les stats d'un fournisseur après un appel
@@ -132,6 +215,7 @@ export async function recordProviderCall(
   latencyMs: number,
   errorMessage?: string
 ): Promise<void> {
+<<<<<<< HEAD
   const provider = await db.aIProvider.findUnique({ where: { slug } })
   if (!provider) return
 
@@ -175,6 +259,58 @@ export async function recordProviderCall(
 }
 
 // Extraire le code d'erreur HTTP
+=======
+  try {
+    const provider = await db.aIProvider.findUnique({ where: { slug } })
+    if (!provider) return
+
+    const newData: Record<string, unknown> = {
+      totalCalls: { increment: 1 },
+      successCalls: success ? { increment: 1 } : undefined,
+      failedCalls: success ? undefined : { increment: 1 },
+      lastError: success ? null : (errorMessage || 'Erreur inconnue').substring(0, 500),
+      lastErrorAt: success ? null : new Date(),
+      updatedAt: new Date(),
+    }
+    Object.keys(newData).forEach(k => newData[k] === undefined && delete newData[k])
+
+    const totalCalls = provider.totalCalls + 1
+    const currentAvg = provider.avgLatencyMs
+    const newAvg = Math.round((currentAvg * provider.totalCalls + latencyMs) / totalCalls)
+
+    await db.aIProvider.update({
+      where: { slug },
+      data: {
+        ...newData,
+        avgLatencyMs: newAvg,
+        // Mettre à jour le health status
+        healthStatus: success ? 'healthy' : 'unhealthy',
+        lastHealthCheck: new Date(),
+      },
+    })
+
+    // Enregistrer l'erreur si échec
+    if (!success && errorMessage) {
+      try {
+        await db.providerErrorLog.create({
+          data: {
+            providerId: provider.id,
+            errorMessage: errorMessage.substring(0, 2000),
+            errorCode: extractErrorCode(errorMessage),
+          },
+        })
+      } catch {
+        // Ignorer les erreurs de logging
+      }
+    }
+
+    invalidateProviderCache()
+  } catch (error) {
+    console.error(`[Registry] Erreur recordProviderCall(${slug}):`, error)
+  }
+}
+
+>>>>>>> 193a7f0736ab7f89bd2ff817723055c019ba95b3
 function extractErrorCode(message: string): string {
   const match = message.match(/error\s+(\d{3})/i)
   return match ? match[1] : 'UNKNOWN'
@@ -197,7 +333,10 @@ export async function healthCheck(slug: string): Promise<{
     let message = ''
 
     if (provider.apiType === 'gemini') {
+<<<<<<< HEAD
       // Gemini : vérifier avec une requête minimale
+=======
+>>>>>>> 193a7f0736ab7f89bd2ff817723055c019ba95b3
       const url = `${provider.baseUrl}?key=${provider.apiKey}`
       const res = await fetch(url, {
         method: 'POST',
@@ -211,6 +350,7 @@ export async function healthCheck(slug: string): Promise<{
       healthy = res.ok
       message = healthy ? 'Connectivité OK' : `Erreur HTTP ${res.status}`
     } else {
+<<<<<<< HEAD
       // OpenAI-compatible : tester avec models list ou chat minimal
       // Essayer d'abord l'endpoint models (plus léger)
       const modelsUrl = provider.baseUrl.replace(/\/chat\/completions.*$/, '/models')
@@ -231,6 +371,25 @@ export async function healthCheck(slug: string): Promise<{
         // Fallback : essayer un chat minimal
         const chatUrl = provider.baseUrl
         const chatRes = await fetch(chatUrl, {
+=======
+      const modelsUrl = provider.baseUrl.replace(/\/chat\/completions.*$/, '/models').replace(/\/ai\/run\/.*$/, '')
+      const authValue = provider.authPrefix + provider.apiKey
+
+      if (modelsUrl !== provider.baseUrl) {
+        const res = await fetch(modelsUrl, {
+          method: 'GET',
+          headers: { 'Authorization': authValue },
+          signal: AbortSignal.timeout(10000),
+        })
+        if (res.ok) {
+          healthy = true
+          message = 'Connectivité OK (models)'
+        }
+      }
+
+      if (!healthy) {
+        const chatRes = await fetch(provider.baseUrl, {
+>>>>>>> 193a7f0736ab7f89bd2ff817723055c019ba95b3
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -244,17 +403,25 @@ export async function healthCheck(slug: string): Promise<{
           signal: AbortSignal.timeout(10000),
         })
         healthy = chatRes.ok
+<<<<<<< HEAD
         message = healthy ? 'Connectivité OK (chat endpoint)' : `Erreur HTTP ${chatRes.status}`
+=======
+        message = healthy ? 'Connectivité OK (chat)' : `Erreur HTTP ${chatRes.status}`
+>>>>>>> 193a7f0736ab7f89bd2ff817723055c019ba95b3
       }
     }
 
     const latency = Date.now() - start
 
+<<<<<<< HEAD
     // Mettre à jour le statut en DB
+=======
+>>>>>>> 193a7f0736ab7f89bd2ff817723055c019ba95b3
     await db.aIProvider.update({
       where: { slug },
       data: {
         healthStatus: healthy ? 'healthy' : 'unhealthy',
+<<<<<<< HEAD
         healthMessage: message,
         lastHealthCheck: new Date(),
         updatedAt: new Date(),
@@ -268,6 +435,16 @@ export async function healthCheck(slug: string): Promise<{
       message,
       latency,
     }
+=======
+        lastHealthCheck: new Date(),
+        updatedAt: new Date(),
+      },
+    }).catch(() => {})
+
+    invalidateProviderCache()
+
+    return { status: healthy ? 'healthy' : 'unhealthy', message, latency }
+>>>>>>> 193a7f0736ab7f89bd2ff817723055c019ba95b3
   } catch (error) {
     const latency = Date.now() - start
     const message = error instanceof Error ? error.message : 'Erreur inconnue'
@@ -276,11 +453,18 @@ export async function healthCheck(slug: string): Promise<{
       where: { slug },
       data: {
         healthStatus: 'unhealthy',
+<<<<<<< HEAD
         healthMessage: message.substring(0, 500),
         lastHealthCheck: new Date(),
         updatedAt: new Date(),
       },
     })
+=======
+        lastHealthCheck: new Date(),
+        updatedAt: new Date(),
+      },
+    }).catch(() => {})
+>>>>>>> 193a7f0736ab7f89bd2ff817723055c019ba95b3
 
     invalidateProviderCache()
 
@@ -310,7 +494,11 @@ export async function healthCheckAll(): Promise<Record<string, {
   return results
 }
 
+<<<<<<< HEAD
 // Convertir un provider DB en format public (sans clé API)
+=======
+// Convertir un provider DB en format public
+>>>>>>> 193a7f0736ab7f89bd2ff817723055c019ba95b3
 export function toPublic(p: {
   id: string
   slug: string

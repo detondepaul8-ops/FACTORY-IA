@@ -51,4 +51,10 @@ prompt
 
 server.log
 # Skills directory
+<<<<<<< HEAD
 /skills/
+=======
+/skills/scripts/activate-groq.js
+db/custom.db
+*.db
+>>>>>>> 193a7f0736ab7f89bd2ff817723055c019ba95b3
